@@ -17,8 +17,7 @@ class StartNewSeriesService {
     });
     
     const selectedCollection = settings?.collectionName;
-    const ignoredTVCollections = settings?.ignoredTVCollections ? 
-      JSON.parse(settings.ignoredTVCollections) : [];
+    const ignoredTVCollections = require('./utils/collectionSettings').getIgnoredCollections(settings);
     
     console.log('Selected collection:', selectedCollection);
     console.log('Ignored TV collections:', ignoredTVCollections);
@@ -42,7 +41,7 @@ class StartNewSeriesService {
         
         // Step 3: If any of those collections is the collection selected in settings, go back to step 1
         if (selectedCollection && seriesCollections.some(col => 
-          col.toLowerCase().includes(selectedCollection.toLowerCase())
+          col.toLowerCase() === selectedCollection.toLowerCase()
         )) {
           console.log(`❌ Series is in selected collection "${selectedCollection}", skipping...`);
           continue;

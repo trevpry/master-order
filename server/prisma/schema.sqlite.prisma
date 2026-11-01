@@ -25,12 +25,17 @@ model Settings {
   customOrderPercent                Int       @default(0)
   historyPlusPercent                Int       @default(0)
   partiallyWatchedCollectionPercent Int       @default(75)
-  ignoredMovieCollections           String?
-  ignoredTVCollections              String?
+  ignoredMovieCollections           String? // Legacy (Plex era); superseded by ignoredCollections
+  ignoredTVCollections              String? // Legacy (Plex era); superseded by ignoredCollections
+  ignoredCollections                String? // JSON array of collection names (movies + TV are unified in Jellyfin)
+  jellyfinUrl                       String?
+  jellyfinApiKey                    String?
+  jellyfinUserId                    String?
+  jellyfinSyncInterval              Int       @default(12)
   christmasFilterEnabled            Boolean   @default(false)
   plexSyncInterval                  Int       @default(12)
   stashSyncInterval                 Int       @default(24)
-  libraryProvider                    String    @default("plex") // "plex" | "arr" - see SONARR_RADARR_DIRECT_PLAY_MIGRATION_PLAN.md
+  libraryProvider                    String    @default("jellyfin") // "jellyfin" | "arr" ("plex" is treated as "jellyfin")
   radarrUrl                          String?
   radarrApiKey                       String?
   radarrSyncInterval                 Int       @default(12)
@@ -78,6 +83,7 @@ model Settings {
 
 model PlexSyncRunLog {
   id                   Int      @id @default(autoincrement())
+  provider             String   @default("plex") // "plex" (music) | "jellyfin" (movies/TV)
   startedAt            DateTime
   completedAt          DateTime
   durationSeconds      Float
@@ -426,6 +432,44 @@ model CustomOrderItem {
   @@index([sectionId])
 }
 
+// Jellyfin collections (BoxSets). A collection can contain movies, series and
+// other collections, so membership is stored as a graph (MediaCollectionItem).
+// Movie/show video rows (PlexMovie/PlexTVShow, now populated from Jellyfin)
+// also carry a flattened JSON `collections` list that includes every ancestor.
+model MediaCollection {
+  id           Int                   @id @default(autoincrement())
+  jellyfinId   String                @unique
+  name         String
+  sortName     String?
+  overview     String?
+  thumb        String?
+  childCount   Int?
+  removed      Boolean               @default(false)
+  lastSyncedAt DateTime              @default(now())
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  items        MediaCollectionItem[] @relation("CollectionItems")
+  parentLinks  MediaCollectionItem[] @relation("ChildCollection")
+
+  @@index([name])
+}
+
+model MediaCollectionItem {
+  id                Int              @id @default(autoincrement())
+  collectionId      Int
+  itemType          String // "movie" | "show" | "collection"
+  itemKey           String // Jellyfin item id (PlexMovie/PlexTVShow ratingKey or MediaCollection jellyfinId)
+  childCollectionId Int?
+  sortOrder         Int              @default(0)
+  createdAt         DateTime         @default(now())
+  collection        MediaCollection  @relation("CollectionItems", fields: [collectionId], references: [id], onDelete: Cascade)
+  childCollection   MediaCollection? @relation("ChildCollection", fields: [childCollectionId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, itemKey])
+  @@index([itemKey])
+  @@index([childCollectionId])
+}
+
 model PlexLibrarySection {
   id               Int            @id @default(autoincrement())
   sectionKey       String         @unique
@@ -528,6 +572,8 @@ model PlexSeason {
   images              PlexImage[]
   show                PlexTVShow           @relation(fields: [showRatingKey], references: [ratingKey])
   ultraBlurColors     PlexUltraBlurColor[]
+
+  @@index([showRatingKey])
 }
 
 model PlexEpisode {
@@ -577,6 +623,8 @@ model PlexEpisode {
   roles                 PlexRole[]
   ultraBlurColors       PlexUltraBlurColor[]
   writers               PlexWriter[]
+
+  @@index([seasonRatingKey])
 }
 
 model PlexMovie {
@@ -731,6 +779,9 @@ model PlexDirector {
   updatedAt        DateTime     @updatedAt
   episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
   movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([episodeRatingKey])
 }
 
 model PlexGenre {
@@ -745,6 +796,9 @@ model PlexGenre {
   updatedAt      DateTime    @updatedAt
   show           PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
   movie          PlexMovie?  @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([showRatingKey])
 }
 
 model PlexProducer {
@@ -757,6 +811,8 @@ model PlexProducer {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   movie          PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
 }
 
 model PlexWriter {
@@ -771,6 +827,9 @@ model PlexWriter {
   updatedAt        DateTime     @updatedAt
   episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
   movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([episodeRatingKey])
 }
 
 model PlexRole {
@@ -786,6 +845,9 @@ model PlexRole {
   updatedAt        DateTime     @updatedAt
   episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
   movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([episodeRatingKey])
 }
 
 model PlexCountry {
@@ -798,6 +860,8 @@ model PlexCountry {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   movie          PlexMovie? @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
 }
 
 model PlexRating {
@@ -811,6 +875,9 @@ model PlexRating {
   updatedAt        DateTime     @updatedAt
   episode          PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
   movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([episodeRatingKey])
 }
 
 model PlexGuid {
@@ -826,6 +893,11 @@ model PlexGuid {
   season           PlexSeason?  @relation(fields: [seasonRatingKey], references: [ratingKey])
   show             PlexTVShow?  @relation(fields: [showRatingKey], references: [ratingKey])
   movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([showRatingKey])
+  @@index([seasonRatingKey])
+  @@index([episodeRatingKey])
 }
 
 model PlexMedia {
@@ -850,6 +922,9 @@ model PlexMedia {
   updatedAt             DateTime     @updatedAt
   episode               PlexEpisode? @relation(fields: [episodeRatingKey], references: [ratingKey])
   movie                 PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([episodeRatingKey])
 }
 
 model PlexImage {
@@ -867,6 +942,11 @@ model PlexImage {
   season           PlexSeason?  @relation(fields: [seasonRatingKey], references: [ratingKey])
   show             PlexTVShow?  @relation(fields: [showRatingKey], references: [ratingKey])
   movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([showRatingKey])
+  @@index([seasonRatingKey])
+  @@index([episodeRatingKey])
 }
 
 model PlexUltraBlurColor {
@@ -885,6 +965,11 @@ model PlexUltraBlurColor {
   season           PlexSeason?  @relation(fields: [seasonRatingKey], references: [ratingKey])
   show             PlexTVShow?  @relation(fields: [showRatingKey], references: [ratingKey])
   movie            PlexMovie?   @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([showRatingKey])
+  @@index([seasonRatingKey])
+  @@index([episodeRatingKey])
 }
 
 model PlexLabel {
@@ -899,6 +984,9 @@ model PlexLabel {
   updatedAt      DateTime    @updatedAt
   show           PlexTVShow? @relation(fields: [showRatingKey], references: [ratingKey])
   movie          PlexMovie?  @relation(fields: [movieRatingKey], references: [ratingKey])
+
+  @@index([movieRatingKey])
+  @@index([showRatingKey])
 }
 
 model WatchLog {

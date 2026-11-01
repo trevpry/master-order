@@ -404,14 +404,14 @@ function Dashboard() {
 
       {/* Now Playing on Plex */}
       <Card style={{ marginBottom: '1.5rem' }}>
-        <SectionHeader icon="📺" title="Now Playing on Plex" count={sessions.length} />
+        <SectionHeader icon="📺" title="Now Playing" count={sessions.length} />
         {data?.plexSessionsError && (
           <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginBottom: '0.75rem' }}>
             Could not reach Plex: {data.plexSessionsError}
           </div>
         )}
         {sessions.length === 0 && !data?.plexSessionsError && (
-          <EmptyState label="Nothing playing on Plex right now" />
+          <EmptyState label="Nothing playing on Jellyfin or Plex right now" />
         )}
         {playingSessions.length > 0 && (
           <div style={{ marginBottom: pausedSessions.length ? '1rem' : 0 }}>
@@ -605,7 +605,7 @@ function Dashboard() {
 
         {/* Last Plex item */}
         <Card>
-          <SectionHeader icon="📺" title="Last Plex Item" />
+          <SectionHeader icon="📺" title="Last Watched Item" />
           {data?.lastPlexItem ? (
             <div>
               <div style={{ fontWeight: 600, fontSize: '0.95rem', color: '#1e293b', marginBottom: '0.2rem' }}>{data.lastPlexItem.title}</div>
@@ -624,7 +624,7 @@ function Dashboard() {
               </div>
               <Link to="/media/up-next" style={{ display: 'inline-block', marginTop: '0.75rem', fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}>Open Media →</Link>
             </div>
-          ) : <EmptyState label="No Plex items watched yet" />}
+          ) : <EmptyState label="No movies or episodes watched yet" />}
         </Card>
 
         {/* Last music track */}

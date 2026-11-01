@@ -769,7 +769,7 @@ function MediaHome() {
         // Don't stop the Plex playback if webhook fails
       }
 
-      const response = await fetch(`${config.apiBaseUrl}/api/plex/play`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/jellyfin/play`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -796,9 +796,9 @@ function MediaHome() {
 
         // Provide helpful error messages for common issues
         if (errorMessage.includes('No player specified') || errorMessage.includes('not found')) {
-          errorMessage = 'No Plex player selected. Please go to Settings and select a player first.';
+          errorMessage = 'No Jellyfin player selected. Please go to Settings and select a player first.';
         } else if (errorMessage.includes('not currently available')) {
-          errorMessage = 'Selected Plex player is not currently available. Try refreshing players in Settings.';
+          errorMessage = 'Selected Jellyfin player is not currently connected. Open the Jellyfin app on the device and try again.';
         }
 
         setError(errorMessage);
@@ -1173,6 +1173,10 @@ function MediaHome() {
     if (media?.type === 'webvideo') {
       return null;
     }
+    // TV episodes always show the Jellyfin season artwork when available
+    if (media?.seasonArtwork) {
+      return `${config.apiBaseUrl}/api/artwork${media.seasonArtwork}`;
+    }
 
     // First priority: Check for cached artwork (works for all media types)
     if (media?.localArtworkPath) {
@@ -1305,7 +1309,7 @@ function MediaHome() {
                       minWidth: '40px',
                       padding: '8px 12px'
                     }}
-                    title={selectedMedia.streamUrl ? 'Play this episode/movie directly in your browser' : 'Play this episode/movie on your selected Plex device'}
+                    title={selectedMedia.streamUrl ? 'Play this episode/movie directly in your browser' : 'Play this episode/movie on your selected Jellyfin device'}
                   >
                     {playingOnPlex ? '⏳' : '🎬'}
                   </Button>
@@ -1549,6 +1553,9 @@ function MediaHome() {
                           } else if (selectedMedia.type === 'book' || selectedMedia.type === 'shortstory') {
                             // For books and short stories, if artwork fails, hide the image
                             e.target.style.display = 'none';
+                          } else if (selectedMedia.seasonArtwork && e.target.src.includes(selectedMedia.seasonArtwork) && selectedMedia.tvdbArtwork?.url) {
+                            // If Jellyfin season artwork fails, fall back to TVDB season artwork
+                            e.target.src = `${config.apiBaseUrl}/api/tvdb-artwork?url=${encodeURIComponent(selectedMedia.tvdbArtwork.url)}`;
                           } else if (selectedMedia.tvdbArtwork?.url && !e.target.src.includes('/api/artwork')) {
                             // If TVDB artwork fails, try Plex artwork as fallback
                             console.log('TVDB artwork failed, trying Plex artwork fallback');

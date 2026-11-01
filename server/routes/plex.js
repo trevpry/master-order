@@ -16,6 +16,7 @@ const prisma = require('../prismaClient');
 const PlexSyncService = require('../plexSyncService');
 const PlexPlayerService = require('../plexPlayerService');
 const BackgroundSyncService = require('../backgroundSyncService');
+const jellyfinPlayer = require('../services/jellyfinPlayerService');
 
 // Initialize services
 let plexSyncService = null;
@@ -150,21 +151,17 @@ router.post('/cleanup', asyncHandler(async (req, res) => {
 
 // ===== CONTENT MANAGEMENT =====
 
-// GET /api/plex/collections - Get Plex collections
+// GET /api/plex/collections - Unified movie/TV collections (Jellyfin BoxSets)
 router.get('/collections', asyncHandler(async (req, res) => {
-  // Get all collections from both TV shows and movies using plexDb
-  const PlexDatabaseService = require('../plexDatabaseService');
-  const plexDb = new PlexDatabaseService();
-  
-  const tvCollections = await plexDb.getAllTVCollections();
-  const movieCollections = await plexDb.getAllMovieCollections();
-  
-  // Combine and deduplicate collections
-  const allCollections = [...new Set([...tvCollections, ...movieCollections])];
+  const collections = await prisma.mediaCollection.findMany({
+    where: { removed: false },
+    select: { name: true }
+  });
+  const allCollections = [...new Set(collections.map(c => c.name))];
   
   // Sort alphabetically and format for dropdown
   const formattedCollections = allCollections
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
     .map(collection => ({
       value: collection,
       label: collection
@@ -405,30 +402,14 @@ router.get('/movie-browser', asyncHandler(async (req, res) => {
   });
 }));
 
-// GET /api/plex/players - Get Plex players
+// GET /api/plex/players - Video players (Jellyfin remote-controllable sessions)
 router.get('/players', asyncHandler(async (req, res) => {
-  if (!plexPlayerService) {
-    await initializePlexServices();
-  }
-  
-  if (!plexPlayerService) {
-    return res.status(400).json({ 
-      error: 'Plex player service not configured'
-    });
-  }
-  
-  const players = await plexPlayerService.getPlayers();
-  
-  // Format players for dropdown
-  const formattedPlayers = players.map(player => ({
+  const players = await jellyfinPlayer.getPlayers();
+  res.json(players.map(player => ({
     value: player.machineIdentifier,
-    label: player.isFallback 
-      ? `${player.name} [Fallback]`
-      : `${player.name} (${player.product}) - ${player.platform}`,
+    label: `${player.name} (${player.product})${player.userName ? ` - ${player.userName}` : ''}`,
     ...player
-  }));
-  
-  res.json(formattedPlayers);
+  })));
 }));
 
 // GET /api/plex/selected-player - Get selected Plex player
@@ -522,102 +503,38 @@ router.get('/users', asyncHandler(async (req, res) => {
 
 // ===== PLAYBACK CONTROL =====
 
-// POST /api/plex/play - Play Plex content
+// POST /api/plex/play - Play a movie/episode on the selected Jellyfin player
 router.post('/play', asyncHandler(async (req, res) => {
-  if (!plexPlayerService) {
-    await initializePlexServices();
-  }
-  
-  if (!plexPlayerService) {
-    return res.status(400).json({ 
-      error: 'Plex player service not configured'
-    });
-  }
-  
   const { ratingKey, offset = 0, playerId } = req.body;
   
   if (!ratingKey) {
     return sendBadRequest(res, 'Missing ratingKey parameter');
   }
   
-  let targetPlayerId = playerId;
-  
-  // If no specific player provided, use the selected player from settings
-  if (!targetPlayerId) {
-    const settings = await prisma.settings.findFirst();
-    
-    if (!settings || !settings.selectedPlayer) {
-      return res.status(400).json({ 
-        error: 'No player specified and no default player selected in settings' 
-      });
-    }
-    
-    targetPlayerId = settings.selectedPlayer;
-  }
-
-  console.log('Playing media on device:', targetPlayerId);
-  
-  const result = await plexPlayerService.playMedia(targetPlayerId, ratingKey, offset);
+  const result = await jellyfinPlayer.playMedia(playerId, String(ratingKey), Number(offset || 0) * 1000);
   if (result?.success !== true) {
-    return sendServerError(res, result?.error || 'Plex player did not accept the playback command');
+    return sendServerError(res, typeof result?.error === 'string' ? result.error : 'Jellyfin player did not accept the playback command');
   }
   sendSuccess(res, result);
 }));
 
 // POST /api/plex/play-with-retry - Play with retry logic
 router.post('/play-with-retry', asyncHandler(async (req, res) => {
-  if (!plexPlayerService) {
-    await initializePlexServices();
-  }
-  
-  if (!plexPlayerService) {
-    return res.status(400).json({ 
-      error: 'Plex player service not configured'
-    });
-  }
-  
-  const { ratingKey, mediaType, retryCount = 3 } = req.body;
+  const { ratingKey, retryCount = 3, playerId } = req.body;
   if (!ratingKey) {
     return sendBadRequest(res, 'Missing ratingKey parameter');
   }
-  
-  const result = await plexPlayerService.playMediaWithRetry(ratingKey, mediaType, retryCount);
-  res.json(result);
-}));
-
-// POST /api/plex/play-via-plex-tv - Play via Plex.tv
-router.post('/play-via-plex-tv', asyncHandler(async (req, res) => {
-  if (!plexPlayerService) {
-    await initializePlexServices();
+  let result = null;
+  for (let attempt = 1; attempt <= Math.max(1, Number(retryCount) || 1); attempt++) {
+    result = await jellyfinPlayer.playMedia(playerId, String(ratingKey), 0);
+    if (result?.success) break;
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  
-  if (!plexPlayerService) {
-    return res.status(400).json({ 
-      error: 'Plex player service not configured'
-    });
-  }
-  
-  const { ratingKey, machineIdentifier } = req.body;
-  if (!ratingKey) {
-    return sendBadRequest(res, 'Missing ratingKey parameter');
-  }
-  
-  const result = await plexPlayerService.playViaPlexTv(ratingKey, machineIdentifier);
   res.json(result);
 }));
 
 // POST /api/plex/control/:action - Control playback (pause, resume, stop, etc.)
 router.post('/control/:action', asyncHandler(async (req, res) => {
-  if (!plexPlayerService) {
-    await initializePlexServices();
-  }
-  
-  if (!plexPlayerService) {
-    return res.status(400).json({ 
-      error: 'Plex player service not configured'
-    });
-  }
-  
   const { action } = req.params;
   const validActions = ['play', 'pause', 'stop', 'skipNext', 'skipPrevious', 'seekTo'];
   
@@ -628,7 +545,7 @@ router.post('/control/:action', asyncHandler(async (req, res) => {
     });
   }
   
-  const result = await plexPlayerService.controlPlayback(action, req.body);
+  const result = await jellyfinPlayer.controlPlayback(req.body?.playerId, action, req.body || {});
   res.json(result);
 }));
 
@@ -653,20 +570,10 @@ router.get('/test-connection', asyncHandler(async (req, res) => {
   });
 }));
 
-// GET /api/plex/device-status/:machineIdentifier - Get device status
+// GET /api/plex/device-status/:machineIdentifier - Get video player (Jellyfin session) status
 router.get('/device-status/:machineIdentifier', asyncHandler(async (req, res) => {
-  if (!plexPlayerService) {
-    await initializePlexServices();
-  }
-  
-  if (!plexPlayerService) {
-    return res.status(400).json({ 
-      error: 'Plex player service not configured'
-    });
-  }
-  
   const { machineIdentifier } = req.params;
-  const status = await plexPlayerService.getDeviceStatus(machineIdentifier);
+  const status = await jellyfinPlayer.getDeviceStatus(machineIdentifier);
   res.json(status);
 }));
 
@@ -734,6 +641,7 @@ router.get('/up-next', asyncHandler(async (req, res) => {
 router.get('/start-new-series', asyncHandler(async (req, res) => {
   const startNewSeriesService = require('../startNewSeriesService');
   const result = await startNewSeriesService.findNewSeries();
+  await require('../utils/seasonArtwork').applySeasonArtwork(result);
   
   console.log(`🎬 Successfully found new series to start: ${result.seriesTitle}`);
   res.json(result);
@@ -791,6 +699,7 @@ router.get('/media/:plexKey', asyncHandler(async (req, res) => {
       updatedAt: itemData.updatedAt
     };
     
+    await require('../utils/seasonArtwork').applySeasonArtwork(responseData);
     return res.json(responseData);
   }
   
@@ -888,118 +797,6 @@ router.get('/debug-raw', asyncHandler(async (req, res) => {
       main: Array.isArray(processedPlayers) ? { success: true, count: processedPlayers.length, players: processedPlayers } : processedPlayers,
       alternative: Array.isArray(alternativePlayers) ? { success: true, count: alternativePlayers.length, players: alternativePlayers } : alternativePlayers
     }
-  });
-}));
-
-// GET /api/plex/test-androidtv-notification - Test AndroidTV notification
-router.post('/test-androidtv-notification', asyncHandler(async (req, res) => {
-  if (!plexPlayerService) {
-    await initializePlexServices();
-  }
-  
-  if (!plexPlayerService) {
-    return res.status(400).json({ 
-      error: 'Plex player service not configured'
-    });
-  }
-  
-  const { ratingKey, offset = 0, playerId } = req.body;
-  
-  if (!ratingKey) {
-    return res.status(400).json({ error: 'ratingKey is required' });
-  }
-  
-  let targetPlayerId = playerId;
-  
-  // If no specific player provided, use the selected player from settings
-  if (!targetPlayerId) {
-    const settings = await prisma.settings.findFirst();
-    
-    if (!settings || !settings.selectedPlayer) {
-      return res.status(400).json({ 
-        error: 'No player specified and no default player selected in settings' 
-      });
-    }
-    
-    targetPlayerId = settings.selectedPlayer;
-  }
-
-  console.log('Testing AndroidTV notification approach for device:', targetPlayerId);
-  
-  // Get media details
-  const mediaResponse = await plexPlayerService.client.query(`/library/metadata/${ratingKey}`);
-  if (!mediaResponse?.MediaContainer?.Metadata?.[0]) {
-    throw new Error('Media not found');
-  }
-  
-  const media = mediaResponse.MediaContainer.Metadata[0];
-  console.log('Media details:', media.title);
-  
-  // Try multiple notification approaches
-  const results = {};
-  
-  // Method 1: Timeline notification
-  try {
-    console.log('Trying timeline notification...');
-    const timelineParams = {
-      ratingKey: ratingKey,
-      key: media.key,
-      state: 'playing',
-      time: offset * 1000,
-      duration: media.duration || 0,
-      machineIdentifier: targetPlayerId
-    };
-    
-    const timelineResponse = await plexPlayerService.client.query('/:/timeline', 'POST', timelineParams);
-    results.timeline = { success: true, response: timelineResponse };
-    console.log('Timeline notification success');
-  } catch (error) {
-    results.timeline = { success: false, error: error.message };
-    console.log('Timeline notification failed:', error.message);
-  }
-  
-  // Method 2: Direct notification
-  try {
-    console.log('Trying direct notification...');
-    const notifyParams = {
-      type: 'playing',
-      machineIdentifier: targetPlayerId,
-      key: media.key,
-      offset: offset * 1000
-    };
-    
-    const notifyResponse = await plexPlayerService.client.query('/:/notify', 'POST', notifyParams);
-    results.notify = { success: true, response: notifyResponse };
-    console.log('Direct notification success');
-  } catch (error) {
-    results.notify = { success: false, error: error.message };
-    console.log('Direct notification failed:', error.message);
-  }
-  
-  // Method 3: Play queue creation
-  try {
-    console.log('Trying play queue creation...');
-    const queueParams = {
-      type: 'video',
-      uri: `library:///directory/${media.key}`,
-      machineIdentifier: targetPlayerId,
-      offset: offset * 1000
-    };
-    
-    const queueResponse = await plexPlayerService.client.query('/playQueues', 'POST', queueParams);
-    results.playQueue = { success: true, response: queueResponse };
-    console.log('Play queue creation success');
-  } catch (error) {
-    results.playQueue = { success: false, error: error.message };
-    console.log('Play queue creation failed:', error.message);
-  }
-  
-  res.json({
-    success: true,
-    message: 'AndroidTV notification test completed',
-    media: media.title,
-    targetDevice: targetPlayerId,
-    results: results
   });
 }));
 

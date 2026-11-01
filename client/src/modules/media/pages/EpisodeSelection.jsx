@@ -831,79 +831,6 @@ function Home() {
     }
   };
 
-  const testAndroidTVNotification = async () => {
-    if (!selectedMedia) {
-      return;
-    }
-
-    // Only support TV shows and movies for now
-    if (!['episode', 'movie'].includes(selectedMedia.type)) {
-      setError('AndroidTV testing is only supported for TV shows and movies');
-      return;
-    }
-
-    setPlayingOnPlex(true);
-    setError('');
-
-    try {
-      // Get the rating key for playback
-      const ratingKey = selectedMedia.episodeRatingKey || selectedMedia.ratingKey;
-      
-      if (!ratingKey) {
-        setError('Unable to test: missing media identifier');
-        return;
-      }
-
-      console.log('Testing AndroidTV notification approaches for ratingKey:', ratingKey);
-      
-      const response = await fetch(`${config.apiBaseUrl}/api/plex/test-androidtv-notification`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ratingKey: ratingKey,
-          offset: 0
-        }),
-      });
-
-      const result = await response.json();
-      
-      if (response.ok) {
-        console.log('AndroidTV test result:', result);
-        
-        // Show detailed results
-        const successMethods = Object.entries(result.results || {})
-          .filter(([method, data]) => data.success)
-          .map(([method]) => method);
-        
-        const failedMethods = Object.entries(result.results || {})
-          .filter(([method, data]) => !data.success)
-          .map(([method, data]) => `${method}: ${data.error}`);
-        
-        let message = `AndroidTV Test for "${result.media}" completed.\n`;
-        
-        if (successMethods.length > 0) {
-          message += `✅ Successful methods: ${successMethods.join(', ')}\n`;
-        }
-        
-        if (failedMethods.length > 0) {
-          message += `❌ Failed methods: ${failedMethods.join('; ')}\n`;
-        }
-        
-        setError(message);
-      } else {
-        console.error('AndroidTV test failed:', result);
-        setError(`AndroidTV test failed: ${result.error || 'Unknown error'}`);
-      }
-    } catch (error) {
-      console.error('Error testing AndroidTV notification:', error);
-      setError('Error testing AndroidTV notification');
-    } finally {
-      setPlayingOnPlex(false);
-    }
-  };
-
   const reportBrowserPlaybackProgress = async ({ currentTime, duration }) => {
     if (!selectedMedia || selectedMedia.libraryProvider !== 'arr' || !selectedMedia.mediaId || !['episode', 'movie'].includes(selectedMedia.type)) {
       return;
@@ -1042,7 +969,7 @@ function Home() {
         // Don't stop the Plex playback if webhook fails
       }
 
-      const response = await fetch(`${config.apiBaseUrl}/api/plex/play`, {
+      const response = await fetch(`${config.apiBaseUrl}/api/jellyfin/play`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1069,9 +996,9 @@ function Home() {
         
         // Provide helpful error messages for common issues
         if (errorMessage.includes('No player specified') || errorMessage.includes('not found')) {
-          errorMessage = 'No Plex player selected. Please go to Settings and select a player first.';
+          errorMessage = 'No Jellyfin player selected. Please go to Settings and select a player first.';
         } else if (errorMessage.includes('not currently available')) {
-          errorMessage = 'Selected Plex player is not currently available. Try refreshing players in Settings.';
+          errorMessage = 'Selected Jellyfin player is not currently connected. Open the Jellyfin app on the device and try again.';
         }
         
         setError(errorMessage);
@@ -1114,6 +1041,10 @@ function Home() {
     // Web videos don't have artwork
     if (media?.type === 'webvideo') {
       return null;
+    }
+    // TV episodes always show the Jellyfin season artwork when available
+    if (media?.seasonArtwork) {
+      return `${config.apiBaseUrl}/api/artwork${media.seasonArtwork}`;
     }
     
     // First priority: Check for cached artwork (works for all media types)
@@ -1222,7 +1153,7 @@ function Home() {
                   minWidth: '40px',
                   padding: '8px 12px'
                 }}
-                title={selectedMedia.streamUrl ? 'Play this episode/movie directly in your browser' : 'Play this episode/movie on your selected Plex device'}
+                title={selectedMedia.streamUrl ? 'Play this episode/movie directly in your browser' : 'Play this episode/movie on your selected Jellyfin device'}
               >
                 {playingOnPlex ? '⏳' : '🎬'}
               </Button>
@@ -1470,6 +1401,9 @@ function Home() {
                           } else if (selectedMedia.type === 'book' || selectedMedia.type === 'shortstory') {
                             // For books and short stories, if artwork fails, hide the image
                             e.target.style.display = 'none';
+                          } else if (selectedMedia.seasonArtwork && e.target.src.includes(selectedMedia.seasonArtwork) && selectedMedia.tvdbArtwork?.url) {
+                            // If Jellyfin season artwork fails, fall back to TVDB season artwork
+                            e.target.src = `${config.apiBaseUrl}/api/tvdb-artwork?url=${encodeURIComponent(selectedMedia.tvdbArtwork.url)}`;
                           } else if (selectedMedia.tvdbArtwork?.url && !e.target.src.includes('/api/artwork')) {
                             // If TVDB artwork fails, try Plex artwork as fallback
                             console.log('TVDB artwork failed, trying Plex artwork fallback');

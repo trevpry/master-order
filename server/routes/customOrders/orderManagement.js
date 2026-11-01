@@ -224,7 +224,7 @@ async function hydrateLibraryArtworkHintsForOrder(prisma, order) {
     if (item.mediaType === 'episode') {
       const episode = episodeByKey.get(item.plexKey);
       if (episode) {
-        item.thumb = episode.thumb || episode.grandparentThumb || episode.parentThumb || null;
+        item.thumb = episode.parentThumb || episode.grandparentThumb || episode.thumb || null;
       }
     } else if (item.mediaType === 'movie') {
       const movie = movieByKey.get(item.plexKey);

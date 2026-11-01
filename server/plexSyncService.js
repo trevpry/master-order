@@ -212,8 +212,8 @@ class PlexSyncService {
       const syncedSections = [];
       
       for (const section of sections) {        
-        // Sync TV, Movie, and Music sections
-        if (section.type === 'show' || section.type === 'movie' || section.type === 'artist') {        const sectionData = {
+        // Movies and TV now come from Jellyfin (see jellyfinSyncService); Plex is music only
+        if (section.type === 'artist') {        const sectionData = {
           sectionKey: section.key,
           title: section.title,
           type: section.type,
@@ -1059,12 +1059,7 @@ class PlexSyncService {
         }
       }
 
-      // Step 3: Proactively reconcile custom order items whose Plex counterpart was already watched
-      console.log('🔁 Reconciling custom order watch states against Plex sync data...');
-      const proactiveReconciled = await this.reconcileAllCustomOrderWatchStates();
-      if (proactiveReconciled > 0) {
-        watchStatusReconciled.total += proactiveReconciled;
-      }
+      // Step 3: Movie/TV custom order reconciliation is handled by the Jellyfin sync
 
       // Step 4: Cleanup orphaned entities (similar to Stash sync)
       console.log('🧹 Starting Plex cleanup of orphaned entities...');
@@ -1174,21 +1169,10 @@ class PlexSyncService {
       const validPlexIds = await this.getAllValidPlexEntityIds();
 
       // Step 2: Mark removed content entities (don't delete for stats purposes)
+      // Movie/TV rows are owned by the Jellyfin sync and must not be touched here.
       console.log('🧹 Step 2: Marking removed content entities...');
-      results.episodes += await this.markRemovedEpisodes(validPlexIds.episodes);
-      results.seasons += await this.markRemovedSeasons(validPlexIds.seasons);
-      results.shows += await this.markRemovedShows(validPlexIds.shows);
-      results.movies += await this.markRemovedMovies(validPlexIds.movies);
-      // Music tracks/albums/artists are intentionally NOT marked as removed.
-      // Music sync is add-only: existing music items are owned by in-app edits and
-      // must never be modified by sync, and since nothing resurrects a removed row,
-      // a false-positive cleanup would hide the item permanently.
       console.log('🎵 Skipping removal marking for music tracks/albums/artists (add-only sync)');
       results.playlists += await this.markRemovedPlaylists(validPlexIds.playlists);
-
-      // Step 3: Clean up complex fields for items that no longer exist in Plex
-      console.log('🧹 Step 3: Cleaning complex fields for deleted Plex items...');
-      results.complexFields += await this.cleanupComplexFieldsForDeletedItems(validPlexIds);
 
       const totalCleaned = Object.values(results).reduce((sum, count) => sum + count, 0);
       console.log(`✅ Plex cleanup completed! Removed ${totalCleaned} orphaned entities:`, results);
@@ -1221,38 +1205,9 @@ class PlexSyncService {
       const sections = sectionsData.MediaContainer?.Directory || [];
 
       for (const section of sections) {
-        if (section.type === 'show') {
-          // Get all shows in this section
-          const showsData = await this.makeRequest(`/library/sections/${section.key}/all?type=2`);
-          const shows = showsData.MediaContainer?.Metadata || [];
-          
-          for (const show of shows) {
-            validIds.shows.add(show.ratingKey);
-            
-            // Get seasons for this show
-            const seasonsData = await this.makeRequest(`/library/metadata/${show.ratingKey}/children`);
-            const seasons = seasonsData.MediaContainer?.Metadata || [];
-            
-            for (const season of seasons) {
-              validIds.seasons.add(season.ratingKey);
-              
-              // Get episodes for this season
-              const episodesData = await this.makeRequest(`/library/metadata/${season.ratingKey}/children`);
-              const episodes = episodesData.MediaContainer?.Metadata || [];
-              
-              for (const episode of episodes) {
-                validIds.episodes.add(episode.ratingKey);
-              }
-            }
-          }
-        } else if (section.type === 'movie') {
-          // Get all movies in this section
-          const moviesData = await this.makeRequest(`/library/sections/${section.key}/all?type=1`);
-          const movies = moviesData.MediaContainer?.Metadata || [];
-          
-          for (const movie of movies) {
-            validIds.movies.add(movie.ratingKey);
-          }
+        // Movie/TV sections are ignored: those libraries are synced from Jellyfin
+        if (section.type === 'show' || section.type === 'movie') {
+          continue;
         } else if (section.type === 'artist') {
           // Get all artists in this section
           const artistsData = await this.makeRequest(`/library/sections/${section.key}/all?type=8`);

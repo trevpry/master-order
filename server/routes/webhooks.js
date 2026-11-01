@@ -28,8 +28,8 @@ const upload = multer({
  * - Integration with watch tracking and media management
  */
 
-// POST /webhook - Main Plex webhook endpoint with thumbnail upload support
-router.post('/', upload.single('thumb'), async (req, res) => {
+// Main media webhook handler (Plex payloads; Jellyfin payloads are normalized to this shape)
+async function handleMediaWebhook(req, res) {
   try {
     console.log('\n🎬 =================================');
     console.log('🎬 PLEX WEBHOOK RECEIVED');
@@ -354,6 +354,85 @@ router.post('/', upload.single('thumb'), async (req, res) => {
     
   } catch (error) {
     console.error('❌ Error processing webhook:', error);
+    res.status(500).send('Error processing webhook');
+  }
+}
+
+router.post('/', upload.single('thumb'), handleMediaWebhook);
+
+/**
+ * Convert a Jellyfin Webhook plugin payload (Generic destination, JSON) into the
+ * Plex-shaped payload understood by handleMediaWebhook. Returns null for events
+ * that are not relevant (e.g. not a movie/episode).
+ */
+function jellyfinPayloadToPlex(body) {
+  const pick = (...keys) => {
+    for (const key of keys) {
+      if (body?.[key] !== undefined && body?.[key] !== null && body?.[key] !== '') return body[key];
+    }
+    return undefined;
+  };
+  const toBool = (value) => value === true || String(value).toLowerCase() === 'true';
+  const toInt = (value) => {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+
+  const notificationType = String(pick('NotificationType', 'Event', 'event') || '');
+  const itemType = String(pick('ItemType', 'Type') || '').toLowerCase();
+  const itemId = pick('ItemId', 'Id');
+  if (!itemId || (itemType !== 'episode' && itemType !== 'movie')) return null;
+
+  const playedToCompletion = toBool(pick('PlayedToCompletion'));
+  const played = toBool(pick('Played'));
+  const saveReason = String(pick('SaveReason') || '');
+  let event = null;
+  if (notificationType === 'PlaybackStart') event = 'media.play';
+  else if (notificationType === 'PlaybackStop') event = playedToCompletion ? 'media.scrobble' : 'media.stop';
+  else if (notificationType === 'UserDataSaved' && played && /PlaybackFinished|TogglePlayed/i.test(saveReason)) event = 'media.scrobble';
+  if (!event) return null;
+
+  const runTimeTicks = Number(pick('RunTimeTicks')) || 0;
+  return {
+    event,
+    source: 'jellyfin',
+    jellyfinUserId: pick('UserId'),
+    Player: { title: pick('DeviceName', 'ClientName') },
+    Server: { title: pick('ServerName') },
+    Metadata: {
+      ratingKey: String(itemId).replace(/-/g, ''),
+      type: itemType,
+      title: pick('Name'),
+      year: toInt(pick('Year')),
+      duration: runTimeTicks ? Math.round(runTimeTicks / 10000) : undefined,
+      grandparentTitle: pick('SeriesName'),
+      parentIndex: toInt(pick('SeasonNumber')),
+      index: toInt(pick('EpisodeNumber'))
+    }
+  };
+}
+
+// POST /api/webhook/jellyfin - Jellyfin Webhook plugin endpoint (Generic destination)
+router.post('/jellyfin', async (req, res) => {
+  try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    const payload = jellyfinPayloadToPlex(body);
+    if (!payload) {
+      return res.status(200).send('OK - Ignored');
+    }
+
+    const { getSettings } = require('../databaseUtils');
+    const settings = await getSettings();
+    const configuredUser = String(settings?.jellyfinUserId || '').replace(/-/g, '').toLowerCase();
+    const eventUser = String(payload.jellyfinUserId || '').replace(/-/g, '').toLowerCase();
+    if (configuredUser && eventUser && configuredUser !== eventUser) {
+      return res.status(200).send('OK - Ignored (different user)');
+    }
+
+    req.body = payload;
+    return handleMediaWebhook(req, res);
+  } catch (error) {
+    console.error('❌ Error processing Jellyfin webhook:', error);
     res.status(500).send('Error processing webhook');
   }
 });

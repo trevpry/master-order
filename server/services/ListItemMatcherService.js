@@ -93,7 +93,7 @@ class ListItemMatcherService {
       return {
         mediaType: 'movie',
         title: plexMovie.title,
-        sourceProvider: 'plex',
+        sourceProvider: 'jellyfin',
         plexKey: plexMovie.ratingKey,
         originalArtworkUrl: plexMovie.thumb || null,
         tvdbYear: plexMovie.year || null
@@ -190,7 +190,7 @@ class ListItemMatcherService {
         return {
           mediaType: 'episode',
           title: plexEpisode.title,
-          sourceProvider: 'plex',
+          sourceProvider: 'jellyfin',
           seriesTitle: plexEpisode.grandparentTitle || plexEpisode.season?.show?.title || seriesTitle,
           seasonNumber: plexEpisode.seasonIndex ?? seasonNumber,
           episodeNumber: plexEpisode.index ?? episodeNumber,
@@ -209,7 +209,7 @@ class ListItemMatcherService {
       return {
         mediaType: 'episode',
         title: scrapedItem.title || plexShow.title,
-        sourceProvider: 'plex',
+        sourceProvider: 'jellyfin',
         seriesTitle: plexShow.title,
         seasonNumber: seasonNumber ?? null,
         episodeNumber: episodeNumber ?? null,

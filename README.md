@@ -1,17 +1,17 @@
 # Master Order
 
-A comprehensive media management application that intelligently curates your next entertainment experience by integrating Plex libraries with external metadata sources like TVDB and ComicVine.
+A comprehensive media management application that intelligently curates your next entertainment experience by integrating Jellyfin movie/TV libraries (and Plex for music) with external metadata sources like TVDB and ComicVine.
 
 ## Features
 
 ### Core Functionality
 - **Smart Episode Selection**: Automatically selects the next unwatched episode from your TV series
 - **Collection-Aware Ordering**: Identifies shared collections between movies and TV shows for chronological viewing
-- **Multi-Source Integration**: Combines Plex library data with TVDB and ComicVine metadata
+- **Multi-Source Integration**: Combines Jellyfin library data with TVDB and ComicVine metadata
 - **Custom Order Management**: Create and manage custom viewing orders for complex franchises
 - **Course Library**: Browse courses under **Media > Courses**, independently of History Plus. Use **Add to Custom Order** on a course or lecture to select one, several, or all lectures. Lectures are appended in course order as web videos, with duplicate URLs skipped and independent watch/progress tracking per custom order. Import course videos first if a course has no lectures yet. Existing History Plus course URLs, video linking, and AI event assignment remain available.
 - **Course Video Import**: **Add Course Videos** supports current Great Courses lecture lists and older numbered headings. **Refresh Course Videos** safely retries imports, skips existing lectures, and replaces older placeholder lecture URLs with the provider's `?lecplay=` links without resetting lecture watch status. Pages with no detected lectures report an error rather than a successful empty import.
-- **Plex Watch Tracking**: Custom-order movies and episodes are automatically marked watched only when Plex reports a positive `viewCount` during sync or sends a `media.scrobble` webhook. Playback activity (`lastViewedAt`, play, resume, pause, or stop) alone does not mark items watched. Manual watched marking remains available.
+- **Jellyfin Watch Tracking**: Custom-order movies and episodes are automatically marked watched only when Jellyfin reports them as played during sync or sends a completed-playback webhook. Playback activity (play, resume, pause, or an unfinished stop) alone does not mark items watched. Manual watched marking remains available and is pushed back to Jellyfin.
 - **Comic Publisher Integration**: Automatically extracts and displays comic publisher information from ComicVine
 - **Advanced Statistics**: Publisher breakdowns, author statistics, and comprehensive watch analytics
 - **Real-time Artwork**: Dynamic artwork fetching and caching from TVDB
@@ -38,8 +38,8 @@ A comprehensive media management application that intelligently curates your nex
 - **Frontend**: React with Vite, TailwindCSS
 - **Backend**: Express.js with comprehensive API
 - **Database**: SQLite for development, PostgreSQL 16 for production
-- **Integrations**: Plex Media Server, TVDB API, ComicVine API
-- **Authentication**: Plex token-based authentication
+- **Integrations**: Jellyfin (movies & TV), Plex Media Server (music), TVDB API, ComicVine API
+- **Authentication**: Jellyfin API key; Plex token for music
 
 ## Architecture
 
@@ -53,13 +53,15 @@ A comprehensive media management application that intelligently curates your nex
 - Express.js RESTful API
 - Prisma database layer with comprehensive models
 - Service-oriented architecture:
-  - `PlexSyncService`: Synchronizes Plex library data
+  - `JellyfinSyncService`: Synchronizes every Jellyfin movie and TV library plus collections
+  - `PlexSyncService`: Synchronizes the Plex music library
   - `TvdbCachedService`: Manages TVDB API calls and caching
   - `ComicVineService`: Handles comic book metadata
   - `PlexDatabaseService`: Database abstraction layer
 
 ### Database Schema
-- **Plex Models**: Movies, TV Shows, Seasons, Episodes, Libraries
+- **Library Models**: Movies, TV Shows, Seasons, Episodes, Libraries (populated from Jellyfin; tables keep their historical `Plex*` names and `ratingKey` holds the Jellyfin item id)
+- **Collection Models**: `MediaCollection` / `MediaCollectionItem` (rows with `childCollectionId` are nested collections) store Jellyfin collections (mixed movies and shows, with nesting)
 - **TVDB Models**: Series, seasons, episodes with artwork caching
 - **ComicVine Models**: Comics, series, volumes
 - **Custom Models**: User-defined viewing orders and settings
@@ -101,6 +103,8 @@ docker run -d \
   -p 3001:3001 \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/artwork-cache:/app/server/artwork-cache \
+  -e JELLYFIN_URL=http://your-jellyfin-server:8096 \
+  -e JELLYFIN_API_KEY=your-jellyfin-api-key \
   -e PLEX_URL=http://your-plex-server:32400 \
   -e PLEX_TOKEN=your-plex-token \
   master-order:latest
@@ -111,7 +115,8 @@ docker run -d \
 ### Prerequisites
 - Node.js (v18 or higher)
 - npm or yarn
-- Plex Media Server with accessible API
+- Jellyfin server (movies & TV) with an API key
+- Plex Media Server (music only, optional)
 - TVDB API account (optional, for enhanced artwork)
 - ComicVine API account (optional, for comic integration)
 
@@ -120,6 +125,9 @@ Create a `.env` file in the `/server` directory:
 
 ```env
 DATABASE_URL="file:./prisma/dev.db"
+JELLYFIN_URL="http://your-jellyfin-server:8096"
+JELLYFIN_API_KEY="your-jellyfin-api-key"
+# JELLYFIN_USER_ID="optional; defaults to the first administrator"
 PLEX_TOKEN="your-plex-token-here"
 PLEX_URL="http://your-plex-server:32400"
 TVDB_API_KEY="your-tvdb-api-key"
@@ -153,9 +161,10 @@ TVDB_BEARER_TOKEN="your-tvdb-bearer-token"
    npx prisma generate
    ```
 
-4. **Configure your Plex connection**
-   - Update the `.env` file with your Plex server details
-   - Ensure your Plex server is accessible from the application
+4. **Configure Jellyfin (and optionally Plex for music)**
+   - Enter the Jellyfin URL and API key (Jellyfin Dashboard → API Keys) in **Settings**, or via the `.env` file. Settings values take precedence.
+   - Click **Sync Jellyfin Libraries**. Every Jellyfin movie and TV library is synced on each run.
+   - Optional: install the Jellyfin **Webhook** plugin and add a *Generic* destination pointing at `http://<master-order-host>:3001/api/webhook/jellyfin` with the **Playback Stop**, **Playback Start** and **User Data Saved** notification types and "Send All Properties" enabled. This lets watched state update immediately instead of waiting for the next sync.
 
 ## Running the Application
 
@@ -186,10 +195,18 @@ npm start
 - `GET /api/settings` - Retrieve application settings
 - `POST /api/settings` - Update application settings
 
-### Plex Integration
-- `POST /api/plex/sync` - Sync Plex library data
+### Jellyfin Integration (movies & TV)
+- `POST /api/jellyfin/sync` - Sync all Jellyfin movie/TV libraries and collections
+- `GET /api/jellyfin/sync-status` - Check sync status
+- `GET /api/jellyfin/collections` / `GET /api/jellyfin/collections/tree` - Collections (flat / nested)
+- `GET /api/jellyfin/players` / `POST /api/jellyfin/play` - Remote-play on a Jellyfin client session
+- `GET /api/jellyfin/playback/:itemId` - Stream info for in-app playback
+- `POST /api/webhook/jellyfin` - Jellyfin Webhook plugin receiver
+
+### Plex Integration (music)
+- `POST /api/plex/sync` - Sync the Plex music library
 - `GET /api/plex/sync-status` - Check sync status
-- `GET /api/search` - Search across Plex libraries
+- `GET /api/search` - Search the local library
 
 ### TVDB Integration
 - `GET /api/tvdb-artwork` - Proxy TVDB artwork requests
@@ -198,7 +215,8 @@ npm start
 ## Configuration
 
 ### Collection Settings
-Configure which Plex collection to use for episode selection in the Settings page.
+Configure which Jellyfin collection to use for episode/movie selection, and which collections to ignore, in the Settings page.
+Jellyfin collections can mix movies and shows and can contain other collections: an item belongs to a collection if it is in it directly or in any collection nested inside it, and ignoring a collection ignores everything nested within it.
 
 ### Order Type Percentages
 Set the probability distribution for different content types:
@@ -227,7 +245,7 @@ Various test scripts are available in the root directory for debugging different
 
 ### Common Issues
 - **Blank Page**: Check browser console for JavaScript errors
-- **API Connection Errors**: Verify Plex server is running and accessible
+- **API Connection Errors**: Verify the Jellyfin (and Plex, for music) servers are running and accessible; `GET /api/health/debug/jellyfin` reports the Jellyfin connection
 - **Database Issues**: Run `npx prisma migrate reset` to reset the database
 - **CORS Errors**: Ensure backend is running on port 3001
 

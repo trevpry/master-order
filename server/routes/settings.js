@@ -4,6 +4,7 @@ const prisma = require('../prismaClient'); // Use shared singleton instance
 const stashService = require('../stashService');
 const { reloadStashSyncServices } = require('./stash/shared');
 const { sendNotFound, sendSuccess, sendServerError, asyncHandler, logError } = require('../utils/responses');
+const { getIgnoredCollections } = require('../utils/collectionSettings');
 
 /**
  * EDDIE LIFE MANAGEMENT - SETTINGS ROUTES
@@ -67,6 +68,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const parsedSettings = {
     ...settings,
+    ignoredCollections: getIgnoredCollections(settings),
     ignoredMovieCollections: settings.ignoredMovieCollections ? 
       (typeof settings.ignoredMovieCollections === 'string' ? 
         JSON.parse(settings.ignoredMovieCollections) : settings.ignoredMovieCollections) : [],
@@ -89,11 +91,19 @@ router.post('/', asyncHandler(async (req, res) => {
   
   // Handle array fields that need to be stringified
   const processedData = { ...settingsData };
-  if (settingsData.ignoredMovieCollections && Array.isArray(settingsData.ignoredMovieCollections)) {
-    processedData.ignoredMovieCollections = JSON.stringify(settingsData.ignoredMovieCollections);
-  }
-  if (settingsData.ignoredTVCollections && Array.isArray(settingsData.ignoredTVCollections)) {
-    processedData.ignoredTVCollections = JSON.stringify(settingsData.ignoredTVCollections);
+  if (Array.isArray(settingsData.ignoredCollections)) {
+    // Single unified list; keep the legacy per-type columns in step so older readers agree
+    const unified = JSON.stringify(settingsData.ignoredCollections);
+    processedData.ignoredCollections = unified;
+    processedData.ignoredMovieCollections = unified;
+    processedData.ignoredTVCollections = unified;
+  } else {
+    if (settingsData.ignoredMovieCollections && Array.isArray(settingsData.ignoredMovieCollections)) {
+      processedData.ignoredMovieCollections = JSON.stringify(settingsData.ignoredMovieCollections);
+    }
+    if (settingsData.ignoredTVCollections && Array.isArray(settingsData.ignoredTVCollections)) {
+      processedData.ignoredTVCollections = JSON.stringify(settingsData.ignoredTVCollections);
+    }
   }
   if (settingsData.filenameParserSpaceSeparators && Array.isArray(settingsData.filenameParserSpaceSeparators)) {
     processedData.filenameParserSpaceSeparators = JSON.stringify(settingsData.filenameParserSpaceSeparators);
@@ -126,6 +136,15 @@ router.post('/', asyncHandler(async (req, res) => {
     update: processedData,
     create: { id: 1, ...processedData }
   });
+
+  try {
+    require('../databaseUtils').clearSettingsCache();
+  } catch (_error) {
+    // cache is best-effort
+  }
+  if (Object.prototype.hasOwnProperty.call(settingsData, 'jellyfinSyncInterval')) {
+    require('../services/jellyfinBackgroundSync').scheduleNextSync().catch(() => {});
+  }
 
   // Reload cached Stash clients after Stash settings change so the app does not keep using stale URLs.
   if (Object.prototype.hasOwnProperty.call(settingsData, 'stashUrl') || Object.prototype.hasOwnProperty.call(settingsData, 'stashApiKey')) {

@@ -79,7 +79,7 @@ function formatAndroidResponse(upNextData, baseUrl) {
       data: {
         ratingKey: upNextData.ratingKey,
         plexId: isArrBacked ? null : upNextData.ratingKey,
-        libraryProvider: upNextData.libraryProvider || 'plex',
+        libraryProvider: resolveLibraryProvider(upNextData),
         mediaId: isArrBacked ? upNextData.id : null,
         title: upNextData.title,
         year: upNextData.year,
@@ -131,7 +131,7 @@ function formatAndroidCustomOrderResponse(upNextData, baseUrl) {
     streamUrl: upNextData.streamUrl || '',
     ratingKey: episodeRatingKey || null,
     plexId: isArrBacked ? null : (episodeRatingKey || null),
-    libraryProvider: upNextData.libraryProvider || 'plex',
+    libraryProvider: resolveLibraryProvider(upNextData),
     mediaId: isArrBacked ? (upNextData.mediaId || null) : null,
     webUrl: upNextData.webUrl || null,
     customOrderId: upNextData.customOrderId || null,
@@ -282,6 +282,12 @@ function formatAndroidHistoryPlusResponse(upNextData, baseUrl) {
   };
 }
 
+function resolveLibraryProvider(upNextData) {
+  if (upNextData?.libraryProvider) return upNextData.libraryProvider;
+  const key = String(upNextData?.episodeRatingKey || upNextData?.ratingKey || '');
+  return /^[0-9a-f]{32}$/i.test(key) ? 'jellyfin' : 'plex';
+}
+
 function formatAndroidTVResponse(upNextData, baseUrl) {
   const artworkUrl = getAndroidArtworkUrl(upNextData, baseUrl);
 
@@ -308,13 +314,18 @@ function formatAndroidTVResponse(upNextData, baseUrl) {
   let episodeArt = upNextData.art || '';
 
   if (!isArrBacked && episodeRatingKey && episodeRatingKey !== seriesRatingKey) {
-    const thumbMatch = upNextData.thumb?.match(/\/(\d+)$/);
-    const artMatch = upNextData.art?.match(/\/(\d+)$/);
-    const thumbTimestamp = thumbMatch ? thumbMatch[1] : Date.now();
-    const artTimestamp = artMatch ? artMatch[1] : Date.now();
+    if (/^[0-9a-f]{32}$/i.test(String(episodeRatingKey))) {
+      episodeThumb = upNextData.seasonArtwork || `/Items/${episodeRatingKey}/Images/Primary`;
+      episodeArt = upNextData.art || `/Items/${seriesRatingKey}/Images/Backdrop`;
+    } else {
+      const thumbMatch = upNextData.thumb?.match(/\/(\d+)$/);
+      const artMatch = upNextData.art?.match(/\/(\d+)$/);
+      const thumbTimestamp = thumbMatch ? thumbMatch[1] : Date.now();
+      const artTimestamp = artMatch ? artMatch[1] : Date.now();
 
-    episodeThumb = `/library/metadata/${episodeRatingKey}/thumb/${thumbTimestamp}`;
-    episodeArt = `/library/metadata/${episodeRatingKey}/art/${artTimestamp}`;
+      episodeThumb = `/library/metadata/${episodeRatingKey}/thumb/${thumbTimestamp}`;
+      episodeArt = `/library/metadata/${episodeRatingKey}/art/${artTimestamp}`;
+    }
   }
 
   return {
@@ -324,7 +335,7 @@ function formatAndroidTVResponse(upNextData, baseUrl) {
       episodeRatingKey: episodeRatingKey,
       seriesRatingKey: seriesRatingKey,
       plexId: isArrBacked ? null : episodeRatingKey,
-      libraryProvider: upNextData.libraryProvider || 'plex',
+      libraryProvider: resolveLibraryProvider(upNextData),
       mediaId: isArrBacked ? upNextData.episodeId : null,
       title: upNextData.title,
       episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,

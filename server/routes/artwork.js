@@ -198,21 +198,35 @@ router.get('/:filename', async (req, res) => {
   }
 });
 
-// GET /api/artwork/* - Proxy artwork from Plex server
+// GET /api/artwork/* - Proxy artwork from Jellyfin (Items/...) or Plex (music)
 router.get('/*', async (req, res) => {
   try {
-    const artworkPath = req.params[0]; // Get everything after /api/artwork/
+    const artworkPath = String(req.params[0] || '').replace(/^\/+/, ''); // Get everything after /api/artwork/
     
     // Get settings using cached database utility
     const { getSettings } = require('../databaseUtils');
     const settings = await getSettings();
-    
-    if (!settings || !settings.plexUrl || !settings.plexToken) {
-      return res.status(500).send('Plex settings not configured');
+
+    let artworkUrl;
+    if (/^Items\//i.test(artworkPath)) {
+      const jellyfinUrl = (settings?.jellyfinUrl || process.env.JELLYFIN_URL || '').replace(/\/+$/, '');
+      const jellyfinApiKey = settings?.jellyfinApiKey || process.env.JELLYFIN_API_KEY;
+      if (!jellyfinUrl || !jellyfinApiKey) {
+        return res.status(500).send('Jellyfin settings not configured');
+      }
+      const params = new URLSearchParams();
+      Object.entries(req.query || {}).forEach(([key, value]) => {
+        if (key.toLowerCase() !== 'api_key' && value !== undefined) params.set(key, String(value));
+      });
+      if (!params.has('maxWidth') && !params.has('fillWidth')) params.set('maxWidth', '800');
+      params.set('api_key', jellyfinApiKey);
+      artworkUrl = `${jellyfinUrl}/${artworkPath}?${params.toString()}`;
+    } else {
+      if (!settings || !settings.plexUrl || !settings.plexToken) {
+        return res.status(500).send('Plex settings not configured');
+      }
+      artworkUrl = `${settings.plexUrl}/${artworkPath}?X-Plex-Token=${settings.plexToken}`;
     }
-    
-    const artworkUrl = `${settings.plexUrl}/${artworkPath}?X-Plex-Token=${settings.plexToken}`;
-    console.log('🎨 Proxying artwork from:', artworkUrl);
     
     const response = await axios.get(artworkUrl, {
       responseType: 'stream'
@@ -227,10 +241,8 @@ router.get('/*', async (req, res) => {
     // Pipe the image data
     response.data.pipe(res);
   } catch (error) {
-    console.error('Error proxying artwork from:', error.config?.url);
-    console.error('Plex error:', error.response?.status, error.response?.statusText);
-    console.error('Full error:', error.message);
-    res.status(500).send('Failed to proxy artwork');
+    console.error('Error proxying artwork:', error.response?.status, error.response?.statusText, error.message);
+    res.status(error.response?.status === 404 ? 404 : 500).send('Failed to proxy artwork');
   }
 });
 

@@ -497,8 +497,13 @@ class ArtworkCacheService {
         // For Plex items, construct the Plex artwork URL using settings
         try {
           const settings = await settingsService.getSettings();
-          if (!settings?.plexUrl || !settings?.plexToken) {
-            console.warn('Plex settings not configured for artwork caching');
+          const jellyfinBase = (settings?.jellyfinUrl || process.env.JELLYFIN_URL || '').replace(/\/+$/, '');
+          const jellyfinKey = settings?.jellyfinApiKey || process.env.JELLYFIN_API_KEY;
+          const imageUrlFor = (ratingKey) => (/^[0-9a-f]{32}$/i.test(String(ratingKey)) && jellyfinBase && jellyfinKey)
+            ? `${jellyfinBase}/Items/${ratingKey}/Images/Primary?maxWidth=1000&api_key=${jellyfinKey}`
+            : `${settings.plexUrl}/library/metadata/${ratingKey}/thumb?X-Plex-Token=${settings.plexToken}`;
+          if (!(jellyfinBase && jellyfinKey) && (!settings?.plexUrl || !settings?.plexToken)) {
+            console.warn('Jellyfin settings not configured for artwork caching');
             return null;
           }
 
@@ -514,7 +519,21 @@ class ArtworkCacheService {
 
           // For episodes, prioritize season artwork; for movies use movie artwork
           if (item.mediaType === 'episode') {
-            // First try to get TVDB season artwork which is higher quality
+            // First preference: Jellyfin season artwork (falls back to the series image when the season has none).
+            if (jellyfinBase && jellyfinKey) {
+              const { resolveSeasonArtworkPath } = require('./utils/seasonArtwork');
+              const seasonPath = await resolveSeasonArtworkPath({
+                episodeRatingKey: fullItem.plexKey,
+                seriesTitle: item.seriesTitle,
+                seasonNumber: item.seasonNumber
+              });
+              if (seasonPath && seasonPath.startsWith('/Items/')) {
+                console.log(`Using Jellyfin season artwork for ${item.seriesTitle} Season ${item.seasonNumber}`);
+                return `${jellyfinBase}${seasonPath}?maxWidth=1000&api_key=${jellyfinKey}`;
+              }
+            }
+
+            // Fallback: TVDB season artwork
             if (item.seriesTitle && item.seasonNumber) {
               const tvdbService = require('./tvdbCachedService');
               try {
@@ -528,24 +547,24 @@ class ArtworkCacheService {
               }
             }
 
-            // Second preference: Plex season artwork.
+            // Next: season/show artwork keys from the library mirror.
             const { seasonRatingKey, showRatingKey } = await this.resolveEpisodeArtworkKeys(item, fullItem);
             if (seasonRatingKey) {
               console.log(`Using Plex season artwork for ${item.seriesTitle} Season ${item.seasonNumber}`);
-              return `${settings.plexUrl}/library/metadata/${seasonRatingKey}/thumb?X-Plex-Token=${settings.plexToken}`;
+              return imageUrlFor(seasonRatingKey);
             }
 
             // Final fallback: show artwork (still avoids episode art as requested).
             if (showRatingKey) {
               console.log(`Using Plex show artwork fallback for ${item.seriesTitle}`);
-              return `${settings.plexUrl}/library/metadata/${showRatingKey}/thumb?X-Plex-Token=${settings.plexToken}`;
+              return imageUrlFor(showRatingKey);
             }
 
             console.warn(`No season/show artwork keys found for episode item ${item.id}`);
             return null;
           } else {
             // For movies, use Plex movie artwork
-            return `${settings.plexUrl}/library/metadata/${fullItem.plexKey}/thumb?X-Plex-Token=${settings.plexToken}`;
+            return imageUrlFor(fullItem.plexKey);
           }
         } catch (error) {
           console.error(`Error constructing Plex artwork URL for item ${item.id}:`, error.message);
@@ -701,6 +720,56 @@ class ArtworkCacheService {
     } catch (error) {
       console.error(`Failed to cleanup artwork for item ${itemId}:`, error.message);
     }
+  }
+
+  /**
+   * Re-cache custom order episode artwork whose source is not the current Jellyfin season image
+   * (e.g. legacy Plex/TVDB artwork cached before the Jellyfin migration).
+   */
+  async refreshEpisodeSeasonArtwork() {
+    const items = await prisma.customOrderItem.findMany({
+      where: { mediaType: 'episode', plexKey: { not: null } }
+    });
+
+    const stale = [];
+    for (const item of items) {
+      if (!/^[0-9a-f]{32}$/i.test(String(item.plexKey))) continue;
+      const expectedUrl = await this.getRemoteArtworkUrl(item);
+      if (!expectedUrl || !expectedUrl.includes('/Items/')) continue;
+      if (item.localArtworkPath && item.originalArtworkUrl === expectedUrl) continue;
+      stale.push(item);
+    }
+
+    if (!stale.length) {
+      return { refreshed: 0, failed: 0 };
+    }
+
+    const staleIds = new Set(stale.map(item => item.id));
+    const stalePaths = [...new Set(stale.map(item => item.localArtworkPath).filter(Boolean))];
+    for (const filePath of stalePaths) {
+      const inUseElsewhere = await prisma.customOrderItem.count({
+        where: { localArtworkPath: filePath, id: { notIn: [...staleIds] } }
+      });
+      if (inUseElsewhere === 0) {
+        await fs.unlink(filePath).catch(() => {});
+      }
+    }
+
+    await prisma.customOrderItem.updateMany({
+      where: { id: { in: [...staleIds] } },
+      data: { localArtworkPath: null, originalArtworkUrl: null, artworkLastCached: null, artworkMimeType: null }
+    });
+
+    let refreshed = 0;
+    let failed = 0;
+    for (const item of stale) {
+      const fresh = await prisma.customOrderItem.findUnique({ where: { id: item.id } });
+      const result = await this.ensureArtworkCached(fresh);
+      if (result.success) refreshed++; else failed++;
+    }
+
+    console.log(`Refreshed Jellyfin season artwork for ${refreshed} custom order episode(s)${failed ? `, ${failed} failed` : ''}`);
+    return { refreshed, failed };
   }
 
   /**

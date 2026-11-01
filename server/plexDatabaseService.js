@@ -104,7 +104,8 @@ class PlexDatabaseService {
       return await this.prisma.plexTVShow.findMany({
         where: {
           collections: {
-            contains: collectionName
+            // collections is a JSON array of names (includes nested/ancestor collections); match the exact element
+            contains: JSON.stringify(collectionName)
           },
           removed: false
         },
@@ -157,7 +158,7 @@ class PlexDatabaseService {
       return await this.prisma.plexMovie.findMany({
         where: {
           collections: {
-            contains: collectionName
+            contains: JSON.stringify(collectionName)
           },
           removed: false
         },
@@ -766,10 +767,11 @@ class PlexDatabaseService {
       
       const result = await this.prisma[tableName].update({
         where: { ratingKey: ratingKey },
-        data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
+        data: { viewCount: 1, lastViewedAt: Math.floor(Date.now() / 1000) } // Set viewCount to 1 to mark as watched
       });
       
       console.log(`🎯 Successfully marked episode ${ratingKey} as watched (viewCount set to 1)`);
+      await require('./services/jellyfinWatchState').pushPlayedState(ratingKey, true);
       return result;
     } catch (error) {
       console.error(`❌ Error marking episode ${ratingKey} as watched:`, error);
@@ -799,10 +801,11 @@ class PlexDatabaseService {
       
       const result = await this.prisma[tableName].update({
         where: { ratingKey: ratingKey },
-        data: { viewCount: 1 } // Set viewCount to 1 to mark as watched
+        data: { viewCount: 1, lastViewedAt: Math.floor(Date.now() / 1000) } // Set viewCount to 1 to mark as watched
       });
       
       console.log(`🎯 Successfully marked movie ${ratingKey} as watched (viewCount set to 1)`);
+      await require('./services/jellyfinWatchState').pushPlayedState(ratingKey, true);
       return result;
     } catch (error) {
       console.error(`❌ Error marking movie ${ratingKey} as watched:`, error);

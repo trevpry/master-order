@@ -14,7 +14,7 @@ Eddie Life Management is a modular full-stack life management platform evolved f
 - **Frontend**: React 19.1.0 + Vite + Tailwind CSS
 - **Backend**: Express.js + Prisma ORM + WebSocket
 - **Database**: SQLite (dev) / PostgreSQL (prod) with automatic detection
-- **APIs**: Plex, Stash, Komga, TVDB, ComicVine, OpenLibrary
+- **APIs**: Jellyfin (movies/TV), Plex (music only), Stash, Komga, TVDB, ComicVine, OpenLibrary
 
 ## Coding Standards
 - Do not open the web browser. You are not able to interact with it.
@@ -25,7 +25,8 @@ Eddie Life Management is a modular full-stack life management platform evolved f
 server/
 ├── index.js                    # Main server (MINIMAL - routes mounted here)
 ├── routes/                     # MODULAR route handlers by domain
-│   ├── plex.js                # Plex integration routes
+│   ├── jellyfin.js            # Jellyfin movie/TV routes (sync, collections, players, playback)
+│   ├── plex.js                # Plex music routes; legacy video endpoints delegate to Jellyfin
 │   ├── stash.js               # Stash integration routes
 │   ├── settings.js            # Settings management
 │   ├── artwork.js             # Artwork proxy/serving
@@ -189,10 +190,18 @@ router.get('/example', asyncHandler(async (req, res) => {
 
 ## Key Integration Points
 
+### Jellyfin Movies & TV
+- Video data lives in the historical `Plex*` tables (`PlexMovie`, `PlexTVShow`, `PlexSeason`, `PlexEpisode`); `ratingKey` is the 32-hex Jellyfin item id
+- Always consider every Jellyfin library of a type — never select a single movie/TV library
+- Collections are unified (movies and shows together) and can be nested: `MediaCollection` + `MediaCollectionItem` (rows with `childCollectionId` are nested collections); each item's `collections` JSON lists direct AND ancestor collections, so match exact names with `contains: JSON.stringify(name)`
+- Use the single `ignoredCollections` setting via `utils/collectionSettings.js` (legacy movie/TV lists are merged in)
+- Jellyfin is the watch-state source of truth; local watched marks are pushed back via `services/jellyfinWatchState.js`
+
 ### Artwork System
-- **Proxy Route**: `/api/artwork/*` handles Plex artwork proxying
+- **Proxy Route**: `/api/artwork/*` proxies Jellyfin images (`/Items/{id}/Images/...`) and Plex music artwork
 - **Cache Service**: `ArtworkCacheService` for local artwork caching
 - **Custom Orders**: Artwork URLs generated via `getArtworkUrl(item, baseUrl)`
+- **TV Episodes**: Always show Jellyfin season artwork. `utils/seasonArtwork.js` adds `seasonArtwork` to episode payloads (Up Next, `/media/:plexKey`, start-new-series); web/Android artwork helpers prefer it. Custom order episodes cache the Jellyfin season image (`refreshEpisodeSeasonArtwork()` runs after each Jellyfin sync)
 
 ### Custom Orders & Up Next
 - **Selection Logic**: `getNextEpisode()` determines TV/Movie/Custom order type
@@ -200,7 +209,8 @@ router.get('/example', asyncHandler(async (req, res) => {
 - **Artwork Integration**: Custom order items include proper artwork URLs
 
 ### Background Services
-- **Plex Sync**: Configurable interval (default 12h)
+- **Jellyfin Sync**: Configurable interval (`jellyfinSyncInterval`); syncs ALL movie and TV libraries
+- **Plex Sync**: Music only, configurable interval (default 12h)
 - **Stash Sync**: Configurable interval (default 24h)
 - **Auto-start**: Services start with server initialization
 

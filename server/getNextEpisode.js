@@ -322,19 +322,11 @@ async function filterTVShowsByIgnoredCollections(tvShows) {
     });
     
     if (!settings) {
-      settings = { ignoredTVCollections: null };
+      settings = {};
     }
 
-    // Parse ignored collections from JSON string
-    let ignoredTVCollections = [];
-    if (settings.ignoredTVCollections && typeof settings.ignoredTVCollections === 'string') {
-      try {
-        ignoredTVCollections = JSON.parse(settings.ignoredTVCollections);
-      } catch (e) {
-        console.warn('Failed to parse ignoredTVCollections JSON:', e);
-        ignoredTVCollections = [];
-      }
-    }
+    // Collections are unified across movies and TV
+    const ignoredTVCollections = require('./utils/collectionSettings').getIgnoredCollections(settings);
 
     if (ignoredTVCollections.length === 0) {
       console.log('📺 No ignored TV collections configured, returning all TV shows');

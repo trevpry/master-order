@@ -196,7 +196,7 @@ function TvBrowser() {
     <main className="tv-browser-main">
       <div className="tv-browser-header">
         <h1>TV Series Browser</h1>
-        <p>Browse series, seasons, episodes, collections, and play status from Plex sync data.</p>
+        <p>Browse series, seasons, episodes, collections, and play status from Jellyfin sync data.</p>
       </div>
 
       <div className="tv-browser-filters">

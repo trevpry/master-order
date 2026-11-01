@@ -269,8 +269,11 @@ app.use('/api/monitoring', monitoringRoutes);
 // Database Health & Diagnostics API routes (SAFE - READ-ONLY)
 app.use('/api/database-health', databaseHealthRoutes);
 
-// Plex Integration API routes
+// Plex Integration API routes (music; legacy video endpoints delegate to Jellyfin)
 app.use('/api/plex', plexRoutes);
+
+// Jellyfin Integration API routes (movies + TV)
+app.use('/api/jellyfin', require('./routes/jellyfin'));
 
 // Stash Integration API routes
 const stashRoutes = createStashRouter({ 
@@ -652,8 +655,9 @@ if (process.env.NODE_ENV === 'production') {
 async function shutdown() {
   console.log('Shutting down server...');
   
-  // Stop background sync service
+  // Stop background sync services
   await backgroundSync.stop();
+  await require('./services/jellyfinBackgroundSync').stop().catch(() => {});
   
   await prisma.$disconnect();
   console.log('Prisma client disconnected.');
@@ -741,11 +745,18 @@ server.listen(PORT, '0.0.0.0', async () => {
     console.error('❌ Database connection failed:', dbError);
   }
   
-  // Start background sync service
+  // Start background sync service (Plex music)
   try {
     await backgroundSync.start();
   } catch (error) {
     console.error('Failed to start background sync service:', error);
+  }
+
+  // Start Jellyfin (movies/TV) background sync service
+  try {
+    await require('./services/jellyfinBackgroundSync').start();
+  } catch (error) {
+    console.error('Failed to start Jellyfin background sync service:', error);
   }
   
   // Start Stash background sync service

@@ -194,4 +194,16 @@ router.get('/debug/stash-clips', async (req, res) => {
   }
 });
 
+router.get('/debug/jellyfin', async (req, res) => {
+  try {
+    const jellyfinService = require('../services/jellyfinService');
+    const jellyfinPlayer = require('../services/jellyfinPlayerService');
+    const connection = await jellyfinService.testConnection().then(info => ({ success: true, ...info }), error => ({ success: false, error: error.message }));
+    const players = connection.success ? await jellyfinPlayer.getPlayers().catch(error => ({ error: error.message })) : [];
+    res.json({ timestamp: new Date().toISOString(), connection, players });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

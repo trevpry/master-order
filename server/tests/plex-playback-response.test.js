@@ -20,7 +20,7 @@ function coreHandler(result) {
   const context = vm.createContext({
     router: { post: (route, handler) => handlers.set(route, handler) },
     asyncHandler: handler => handler,
-    plexPlayerService: { playMedia: async () => result },
+    jellyfinPlayer: { playMedia: async () => result },
     prisma: { settings: { findFirst: async () => ({ selectedPlayer: 'shield' }) } },
     sendSuccess: (res, data) => res.json({ success: true, data }),
     sendServerError: (res, error) => res.status(500).json({ error }),
@@ -32,7 +32,7 @@ function coreHandler(result) {
   return handlers.get('/play');
 }
 
-test('Plex play rejects failed service results instead of wrapping them in HTTP 200', async () => {
+test('Video play rejects failed service results instead of wrapping them in HTTP 200', async () => {
   const res = responseRecorder();
   await coreHandler({ success: false, error: 'Player shield not found' })(
     { body: { ratingKey: '123' } }, res);
@@ -40,7 +40,7 @@ test('Plex play rejects failed service results instead of wrapping them in HTTP 
   assert.equal(res.body.error, 'Player shield not found');
 });
 
-test('Plex play preserves the success envelope and player name', async () => {
+test('Video play preserves the success envelope and player name', async () => {
   const result = { success: true, player: 'Shield' };
   const res = responseRecorder();
   await coreHandler(result)({ body: { ratingKey: '123' } }, res);
@@ -78,7 +78,10 @@ function androidHandlers(playResult, status = 200) {
       };
       if (name === '../../services/musicPlaybackService') return { getInstance: () => ({}) };
       if (name === '../../prismaClient') return {
-        settings: { findFirst: async () => ({ plexUrl: 'http://plex', plexToken: 'test-token' }) }
+        settings: { findFirst: async () => ({}) },
+        plexTVShow: { findMany: async () => [{ ratingKey: '100', title: 'Series', art: '' }] },
+        plexEpisode: { findFirst: async () => ({ ratingKey: '456', title: 'Episode', seasonIndex: 1, index: 2 }) },
+        plexMovie: { findMany: async () => [{ ratingKey: '123', title: 'Movie' }] }
       };
       if (name === 'xml2js') return {
         Parser: class { async parseStringPromise(text) { return text === 'episodes' ? episodes : metadata; } }

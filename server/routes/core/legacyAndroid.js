@@ -49,6 +49,11 @@ function createLegacyAndroidRoutes(prisma) {
           return null;
         }
         
+        // TV episodes always use the Jellyfin season artwork when available
+        if (media?.seasonArtwork) {
+          return `${baseUrl}/api/artwork${media.seasonArtwork}`;
+        }
+
         // First priority: Check for cached artwork (works for all media types)
         if (media?.localArtworkPath) {
           const filename = media.localArtworkPath.includes('\\') || media.localArtworkPath.includes('/')

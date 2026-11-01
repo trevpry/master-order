@@ -32,6 +32,7 @@ class CustomOrderArrBackfillService {
             OR: [
               { sourceProvider: null },
               { sourceProvider: 'plex' },
+              { sourceProvider: 'jellyfin' },
               { movieId: null },
               { episodeId: null },
             ],

@@ -245,7 +245,7 @@ function MovieBrowser() {
     <main className="movie-browser-main">
       <div className="movie-browser-header">
         <h1>Movie Browser</h1>
-        <p>Browse movies, collections, and play status from Plex sync data.</p>
+        <p>Browse movies, collections, and play status from Jellyfin sync data.</p>
       </div>
 
       <div className="movie-browser-filters">

@@ -131,6 +131,46 @@ router.get('/', asyncHandler(async (req, res) => {
     results.plexSessionsError = err.message;
   }
 
+  // ── Active Jellyfin video sessions (movies / TV) ─────────────────────────
+  try {
+    const jellyfin = require('../services/jellyfinService');
+    if (await jellyfin.isConfigured()) {
+      const { ticksToMs } = require('../services/jellyfinService');
+      const sessions = await jellyfin.getSessions({ controllableOnly: false });
+      const videoSessions = (sessions || []).filter(s => ['Episode', 'Movie'].includes(s.NowPlayingItem?.Type));
+      results.plexSessions.push(...videoSessions.map(s => {
+        const item = s.NowPlayingItem;
+        const isEpisode = item.Type === 'Episode';
+        return {
+          ratingKey: item.Id,
+          type: isEpisode ? 'episode' : 'movie',
+          title: item.Name,
+          grandparentTitle: item.SeriesName || null,
+          parentTitle: item.SeasonName || null,
+          parentIndex: item.ParentIndexNumber ?? null,
+          index: item.IndexNumber ?? null,
+          year: item.ProductionYear || null,
+          thumb: isEpisode && item.SeriesId ? `/Items/${item.SeriesId}/Images/Primary` : `/Items/${item.Id}/Images/Primary`,
+          parentThumb: item.SeasonId ? `/Items/${item.SeasonId}/Images/Primary` : null,
+          grandparentThumb: item.SeriesId ? `/Items/${item.SeriesId}/Images/Primary` : null,
+          art: `/Items/${item.SeriesId || item.Id}/Images/Backdrop`,
+          duration: ticksToMs(item.RunTimeTicks),
+          viewOffset: ticksToMs(s.PlayState?.PositionTicks),
+          state: s.PlayState?.IsPaused ? 'paused' : 'playing',
+          playerTitle: s.DeviceName || null,
+          playerDevice: s.Client || null,
+          sessionKey: s.Id,
+          user: s.UserName || null,
+          source: 'jellyfin'
+        };
+      }));
+      // Plex is music-only now; don't surface a Plex video error once Jellyfin sessions loaded
+      results.plexSessionsError = null;
+    }
+  } catch (err) {
+    results.jellyfinSessionsError = err.message;
+  }
+
   // Players report the rating they loaded with; the library holds the current one.
   try {
     const ratingKeys = [...new Set(results.musicSessions.map(s => s.ratingKey).filter(Boolean).map(String))];
@@ -161,6 +201,24 @@ router.get('/', asyncHandler(async (req, res) => {
         plexKey: lastLog.plexKey || null,
         watchedAt: lastLog.createdAt,
       };
+    } else {
+      // No local watch log yet: use the most recent Jellyfin play from the synced library
+      const [episode, movie] = await Promise.all([
+        prisma.plexEpisode.findFirst({ where: { lastViewedAt: { not: null }, removed: false }, orderBy: { lastViewedAt: 'desc' } }),
+        prisma.plexMovie.findFirst({ where: { lastViewedAt: { not: null }, removed: false }, orderBy: { lastViewedAt: 'desc' } })
+      ]);
+      const latest = (episode?.lastViewedAt || 0) >= (movie?.lastViewedAt || 0) ? (episode && { ...episode, kind: 'tv' }) : (movie && { ...movie, kind: 'movie' });
+      if (latest) {
+        results.lastPlexItem = {
+          title: latest.title,
+          seriesTitle: latest.kind === 'tv' ? latest.showTitle : null,
+          seasonNumber: latest.kind === 'tv' ? latest.seasonIndex : null,
+          episodeNumber: latest.kind === 'tv' ? latest.index : null,
+          mediaType: latest.kind,
+          plexKey: latest.ratingKey,
+          watchedAt: new Date(latest.lastViewedAt * 1000),
+        };
+      }
     }
   } catch (err) {
     // non-fatal

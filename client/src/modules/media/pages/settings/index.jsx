@@ -76,12 +76,23 @@ function Settings() {
     checking: false,
     isMobile: false
   });
-  const [deviceStatusLoading, setDeviceStatusLoading] = useState(false);
-  const [deviceStatusDetails, setDeviceStatusDetails] = useState(null);
   
-  // Ignored collections states
-  const [ignoredMovieCollections, setIgnoredMovieCollections] = useState([]);
-  const [ignoredTVCollections, setIgnoredTVCollections] = useState([]);
+  // Ignored collections (unified for movies and TV - Jellyfin collections hold both)
+  const [ignoredCollections, setIgnoredCollections] = useState([]);
+
+  // Jellyfin (movies + TV) states
+  const [jellyfinUrl, setJellyfinUrl] = useState('');
+  const [jellyfinApiKey, setJellyfinApiKey] = useState('');
+  const [jellyfinUserId, setJellyfinUserId] = useState('');
+  const [jellyfinUsers, setJellyfinUsers] = useState([]);
+  const [jellyfinSyncInterval, setJellyfinSyncInterval] = useState(12);
+  const [jellyfinTestLoading, setJellyfinTestLoading] = useState(false);
+  const [jellyfinTestMessage, setJellyfinTestMessage] = useState('');
+  const [jellyfinSyncStatus, setJellyfinSyncStatus] = useState(null);
+  const [jellyfinBackgroundStatus, setJellyfinBackgroundStatus] = useState(null);
+  const [jellyfinSyncLoading, setJellyfinSyncLoading] = useState(false);
+  const [jellyfinSyncMessage, setJellyfinSyncMessage] = useState('');
+  const [jellyfinSyncRunLogs, setJellyfinSyncRunLogs] = useState([]);
 
   // Utility functions
   const showMessage = (msg, isError = false) => {
@@ -111,13 +122,13 @@ function Settings() {
       setLoading(true);
       
       try {        // Fetch all data in parallel for better performance
-        const [settings, syncStatus, backgroundStatus, collections, players, plexUsers, syncLogs] = await Promise.all([
+        const [settings, syncStatus, backgroundStatus, collections, players, plexUsers, syncLogs, jfSyncStatus, jfBackgroundStatus, jfSyncLogs, jfUsers] = await Promise.all([
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/settings`),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-status`),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync-status`),
-          fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/collections`),
-          fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`).catch(error => {
-            console.warn('Failed to load Plex players:', error);
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/collections`).catch(() => []),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/players`).catch(error => {
+            console.warn('Failed to load Jellyfin players:', error);
             return [];
           }),
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/users`).catch(error => {
@@ -127,7 +138,11 @@ function Settings() {
           fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/sync-log?limit=25`).catch(error => {
             console.warn('Failed to load Plex sync run logs:', error);
             return [];
-          })
+          }),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/sync-status`).catch(() => null),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/background-sync-status`).catch(() => null),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/sync-log?limit=25`).catch(() => []),
+          fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/users`).catch(() => [])
         ]);// Update settings
         if (settings) {
           setCollectionName(settings.collectionName || '');
@@ -149,8 +164,11 @@ function Settings() {
           setPlexSyncInterval(settings.plexSyncInterval ?? 12);
           setStashSyncInterval(settings.stashSyncInterval ?? 24);
           setListScrapeInterval(settings.listScrapeInterval ?? 6);
-          setIgnoredMovieCollections(settings.ignoredMovieCollections || []);
-          setIgnoredTVCollections(settings.ignoredTVCollections || []);
+          setIgnoredCollections(settings.ignoredCollections || []);
+          setJellyfinUrl(settings.jellyfinUrl || '');
+          setJellyfinApiKey(settings.jellyfinApiKey || '');
+          setJellyfinUserId(settings.jellyfinUserId || '');
+          setJellyfinSyncInterval(settings.jellyfinSyncInterval ?? 12);
           setChristmasFilterEnabled(settings.christmasFilterEnabled ?? false);
         }        // Update status and data
         setPlexSyncStatus(syncStatus);
@@ -159,6 +177,10 @@ function Settings() {
         setAvailablePlayers(players || []);
         setAvailablePlexUsers(plexUsers || []);
         setPlexSyncRunLogs(Array.isArray(syncLogs) ? syncLogs : []);
+        setJellyfinSyncStatus(jfSyncStatus);
+        setJellyfinBackgroundStatus(jfBackgroundStatus);
+        setJellyfinSyncRunLogs(Array.isArray(jfSyncLogs) ? jfSyncLogs : []);
+        setJellyfinUsers(Array.isArray(jfUsers) ? jfUsers : []);
         
       } catch (error) {
         showMessage('Failed to load settings data. Please refresh the page.', true);
@@ -177,7 +199,7 @@ function Settings() {
   const refreshCollections = async () => {
     try {
       setCollectionsLoading(true);
-      const collections = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/collections`);
+      const collections = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/collections`);
       setAvailableCollections(collections);
       showMessage('Collections refreshed successfully');
     } catch (error) {
@@ -190,7 +212,7 @@ function Settings() {
   const refreshPlayers = async () => {
     try {
       setPlayersLoading(true);
-      const players = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`);
+      const players = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/players`);
       setAvailablePlayers(players || []);
       
       // Check if selected player is currently online
@@ -198,9 +220,9 @@ function Settings() {
         checkDeviceStatus(selectedPlayer, players || []);
       }
       
-      showMessage('Plex players refreshed successfully');
+      showMessage('Jellyfin players refreshed successfully');
     } catch (error) {
-      showMessage('Failed to refresh Plex players', true);
+      showMessage('Failed to refresh Jellyfin players', true);
     } finally {
       setPlayersLoading(false);
     }
@@ -226,12 +248,12 @@ function Settings() {
       setDeviceStatus(prev => ({ ...prev, checking: true }));
       
       // Use current players if provided, otherwise fetch fresh
-      const players = currentPlayers || await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`);
+      const players = currentPlayers || await fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/players`);
       const device = players.find(p => p.machineIdentifier === playerId || p.value === playerId);
       
-      const isMobile = playerId.includes('android') || playerId.includes('ios') || playerId.includes('mobile');
-      const isRegistered = device?.isRegistered || false;
-      const isOnline = !!device && !device.value && !isRegistered; // Active connections are online, registered devices are offline unless actively connected
+      const isMobile = false;
+      const isRegistered = false;
+      const isOnline = !!device; // Jellyfin only lists sessions that are currently connected
       
       setDeviceStatus({
         isOnline,
@@ -249,50 +271,6 @@ function Settings() {
         checking: false,
         lastChecked: new Date() 
       }));
-    }
-  };
-
-  const checkDetailedDeviceStatus = async () => {
-    if (!selectedPlayer) {
-      showMessage('No device selected', true);
-      return;
-    }
-    
-    try {
-      setDeviceStatusLoading(true);
-      setDeviceStatusDetails(null);
-      
-      console.log(`Checking detailed status for device: ${selectedPlayer}`);
-      
-      const response = await fetchWithErrorHandling(
-        `${config.apiBaseUrl}/api/plex/device-status/${encodeURIComponent(selectedPlayer)}`
-      );
-      
-      setDeviceStatusDetails(response);
-      
-      if (response.success && response.found) {
-        showMessage(`Device status check completed for ${response.device.name}`);
-        
-        // Update the basic device status as well
-        setDeviceStatus(prev => ({
-          ...prev,
-          isOnline: response.responsiveness?.responsive || false,
-          lastChecked: new Date(),
-          checking: false,
-          deviceName: response.device.name,
-          isRegistered: response.device.isRegistered,
-          isMobile: response.device.platform === 'Android' || response.device.platform === 'iOS'
-        }));
-      } else {
-        showMessage(`Device not found: ${selectedPlayer}`, true);
-      }
-      
-    } catch (error) {
-      console.error('Error checking detailed device status:', error);
-      showMessage('Failed to check device status: ' + error.message, true);
-      setDeviceStatusDetails({ error: error.message });
-    } finally {
-      setDeviceStatusLoading(false);
     }
   };
 
@@ -344,9 +322,10 @@ function Settings() {
       
       // Track if Plex settings changed to refresh players
       const currentSettings = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/settings`);
-      const plexSettingsChanged = currentSettings && (
-        currentSettings.plexUrl !== plexUrl || 
-        currentSettings.plexToken !== plexToken
+      const jellyfinSettingsChanged = currentSettings && (
+        currentSettings.jellyfinUrl !== jellyfinUrl || 
+        currentSettings.jellyfinApiKey !== jellyfinApiKey ||
+        currentSettings.jellyfinUserId !== jellyfinUserId
       );
       
       await fetchWithErrorHandling(`${config.apiBaseUrl}/api/settings`, {
@@ -373,8 +352,11 @@ function Settings() {
           plexSyncInterval,
           stashSyncInterval,
           listScrapeInterval,
-          ignoredMovieCollections,
-          ignoredTVCollections,
+          ignoredCollections,
+          jellyfinUrl,
+          jellyfinApiKey,
+          jellyfinUserId,
+          jellyfinSyncInterval,
           christmasFilterEnabled
         }),
       });
@@ -385,15 +367,18 @@ function Settings() {
       const backgroundStatus = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/background-sync-status`);
       setBackgroundSyncStatus(backgroundStatus);
       
-      // Refresh Plex players if Plex settings changed
-      if (plexSettingsChanged) {
-        console.log('Plex settings changed, refreshing players...');
+      // Refresh Jellyfin players/collections if Jellyfin settings changed
+      if (jellyfinSettingsChanged) {
         try {
-          const players = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/plex/players`);
+          await fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/refresh-config`, { method: 'POST' });
+          const [players, collections] = await Promise.all([
+            fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/players`),
+            fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/collections`)
+          ]);
           setAvailablePlayers(players || []);
-          console.log('Plex players refreshed successfully');
+          setAvailableCollections(collections || []);
         } catch (playerError) {
-          console.warn('Failed to refresh Plex players after settings update:', playerError);
+          console.warn('Failed to refresh Jellyfin data after settings update:', playerError);
         }
       }
       
@@ -427,6 +412,71 @@ function Settings() {
       setPlexSyncMessage(`Sync failed: ${error.message}`);
     } finally {
       setPlexSyncLoading(false);
+    }
+  };
+
+  const handleJellyfinTestConnection = async () => {
+    setJellyfinTestLoading(true);
+    setJellyfinTestMessage('Testing Jellyfin connection...');
+    try {
+      const result = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/test-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: jellyfinUrl, apiKey: jellyfinApiKey })
+      });
+      setJellyfinUsers(result.users || []);
+      const libraries = (result.libraries || []).map(l => `${l.name} (${l.type})`).join(', ');
+      setJellyfinTestMessage(`✅ ${result.message}. Libraries: ${libraries || 'none'}`);
+    } catch (error) {
+      setJellyfinTestMessage(`❌ Connection failed: ${error.message}`);
+    } finally {
+      setJellyfinTestLoading(false);
+    }
+  };
+
+  const fetchJellyfinStatus = async () => {
+    try {
+      const [status, background, logs] = await Promise.all([
+        fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/sync-status`),
+        fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/background-sync-status`),
+        fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/sync-log?limit=50`)
+      ]);
+      setJellyfinSyncStatus(status);
+      setJellyfinBackgroundStatus(background);
+      setJellyfinSyncRunLogs(Array.isArray(logs) ? logs : []);
+    } catch (error) {
+      setJellyfinSyncMessage(`Failed to refresh Jellyfin status: ${error.message}`);
+    }
+  };
+
+  const handleJellyfinSync = async () => {
+    setJellyfinSyncLoading(true);
+    setJellyfinSyncMessage('Syncing all Jellyfin movie and TV libraries...');
+    try {
+      const data = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const r = data.results || {};
+      setJellyfinSyncMessage(`Sync completed in ${Number(data.duration || 0).toFixed(1)}s: ${r.totalMovies ?? 0} movies, ${r.totalShows ?? 0} shows, ${r.totalEpisodes ?? 0} episodes, ${r.collections?.collections ?? 0} collections (${r.added ?? 0} added, ${r.updated ?? 0} updated, ${r.removed ?? 0} removed)`);
+      await fetchJellyfinStatus();
+      const collections = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/collections`);
+      setAvailableCollections(collections || []);
+    } catch (error) {
+      setJellyfinSyncMessage(`Sync failed: ${error.message}`);
+    } finally {
+      setJellyfinSyncLoading(false);
+    }
+  };
+
+  const handleJellyfinBackgroundAction = async (action) => {
+    try {
+      if (action === 'force-now') setJellyfinSyncMessage('Running forced Jellyfin sync...');
+      const result = await fetchWithErrorHandling(`${config.apiBaseUrl}/api/jellyfin/background-sync/${action}`, { method: 'POST' });
+      setJellyfinSyncMessage(result.result?.message || result.message || 'Done');
+      await fetchJellyfinStatus();
+    } catch (error) {
+      setJellyfinSyncMessage(`Jellyfin background sync ${action} failed: ${error.message}`);
     }
   };
 
@@ -784,7 +834,67 @@ function Settings() {
                 </div>
 
                 <div className="config-field compact">
-                  <label htmlFor="plex_url">Plex Server URL:</label>
+                  <label htmlFor="jellyfin_url">🎞️ Jellyfin Server URL (Movies & TV):</label>
+                  <input 
+                    type="url" 
+                    id="jellyfin_url"
+                    name="jellyfin_url"
+                    value={jellyfinUrl}
+                    onChange={(e) => setJellyfinUrl(e.target.value)}
+                    placeholder="http://192.168.1.100:8096"
+                    className="url-input compact"
+                  />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="jellyfin_api_key">Jellyfin API Key:</label>
+                  <input 
+                    type="password" 
+                    id="jellyfin_api_key"
+                    name="jellyfin_api_key"
+                    value={jellyfinApiKey}
+                    onChange={(e) => setJellyfinApiKey(e.target.value)}
+                    placeholder="Dashboard → API Keys"
+                    className="token-input compact"
+                  />
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="jellyfin_user">👤 Jellyfin User (watch state & webhooks):</label>
+                  <div className="collection-controls">
+                    <select
+                      id="jellyfin_user"
+                      name="jellyfin_user"
+                      value={jellyfinUserId}
+                      onChange={(e) => setJellyfinUserId(e.target.value)}
+                      className="collection-select compact"
+                    >
+                      <option value="">First administrator (default)</option>
+                      {jellyfinUsers.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.name}{user.isAdministrator ? ' (admin)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      onClick={handleJellyfinTestConnection}
+                      disabled={jellyfinTestLoading || !jellyfinUrl || !jellyfinApiKey}
+                      className="refresh-button compact"
+                      title="Test the Jellyfin connection and load users"
+                    >
+                      {jellyfinTestLoading ? '⏳' : '🔌 Test'}
+                    </Button>
+                  </div>
+                  {jellyfinTestMessage && (
+                    <p className="collection-hint">{jellyfinTestMessage}</p>
+                  )}
+                  <p className="collection-hint">
+                    All Jellyfin movie and TV libraries are synced. For automatic watched tracking, point the Jellyfin Webhook plugin (Generic destination, PlaybackStop + UserDataSaved) at <code>{`${config.apiBaseUrl}/api/webhook/jellyfin`}</code>.
+                  </p>
+                </div>
+
+                <div className="config-field compact">
+                  <label htmlFor="plex_url">Plex Server URL (Music):</label>
                   <input 
                     type="url" 
                     id="plex_url"
@@ -808,16 +918,19 @@ function Settings() {
                 </div>
 
                 <div className="config-field compact">
-                  <label htmlFor="plex_players">🎬 Plex Player for Remote Playback:</label>
+                  <label htmlFor="video_players">🎬 Jellyfin Player for Remote Playback:</label>
                   <div className="collection-controls">
                     <select 
-                      id="plex_players"
-                      name="plex_players"
+                      id="video_players"
+                      name="video_players"
                       value={selectedPlayer}
                       onChange={(e) => setSelectedPlayer(e.target.value)}
                       className="collection-select compact"
                     >
-                      <option value="">Select a Plex player/device...</option>
+                      <option value="">Select a Jellyfin client/device...</option>
+                      {selectedPlayer && !availablePlayers.some(p => p.value === selectedPlayer) && (
+                        <option value={selectedPlayer}>{selectedPlayer} (not currently connected)</option>
+                      )}
                       {availablePlayers.map((player) => (
                         <option key={player.value} value={player.value}>
                           {player.label}
@@ -828,253 +941,19 @@ function Settings() {
                       onClick={refreshPlayers}
                       disabled={playersLoading}
                       className="refresh-button compact"
-                      title="Refresh available Plex players"
+                      title="Refresh available Jellyfin clients"
                     >
-                      {playersLoading ? '🔄' : '🔄'}
+                      🔄
                     </Button>
-                    {selectedPlayer && (
-                      <Button
-                        onClick={checkDetailedDeviceStatus}
-                        disabled={deviceStatusLoading}
-                        className="refresh-button compact"
-                        title="Check detailed device status and responsiveness"
-                        style={{ marginLeft: '8px' }}
-                      >
-                        {deviceStatusLoading ? '🔄' : '🔍'}
-                      </Button>
-                    )}
                   </div>
-                  
-                  {/* Device Status Indicator */}
                   {selectedPlayer && (
-                    <div className="device-status" style={{ 
-                      marginTop: '8px', 
-                      padding: '8px 12px', 
-                      borderRadius: '4px',
-                      backgroundColor: deviceStatus.isOnline ? '#d4edda' : 
-                                       deviceStatus.isRegistered ? '#fff3cd' : '#f8d7da',
-                      border: `1px solid ${deviceStatus.isOnline ? '#c3e6cb' : 
-                                            deviceStatus.isRegistered ? '#ffeaa7' : '#f5c6cb'}`,
-                      fontSize: '14px'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '16px' }}>
-                          {deviceStatus.checking ? '🔄' : 
-                           deviceStatus.isOnline ? '🟢' : 
-                           deviceStatus.isRegistered ? '🟡' : '🔴'}
-                        </span>
-                        <span style={{ color: deviceStatus.isOnline ? '#155724' : 
-                                               deviceStatus.isRegistered ? '#856404' : '#721c24' }}>
-                          <strong>{deviceStatus.deviceName || selectedPlayer}</strong>
-                          {deviceStatus.isMobile && ' (Mobile Device)'}
-                          {deviceStatus.isRegistered && ' (AndroidTV/Media Player)'}
-                          {' - '}
-                          {deviceStatus.checking ? 'Checking...' : 
-                           deviceStatus.isOnline ? 'Online & Ready' : 
-                           deviceStatus.isRegistered ? 'Registered & Available' : 'Offline'}
-                        </span>
-                      </div>
-                      
-                      {deviceStatus.isRegistered && (
-                        <div style={{ 
-                          marginTop: '8px', 
-                          fontSize: '12px', 
-                          color: '#856404',
-                          borderTop: '1px solid #ffeaa7',
-                          paddingTop: '8px'
-                        }}>
-                          <p style={{ margin: '0 0 4px 0' }}>
-                            <strong>📺 AndroidTV/Media Device:</strong>
-                          </p>
-                          <p style={{ margin: '0' }}>
-                            This device is registered with your Plex server and ready for remote playback. 
-                            It doesn't need to be actively playing to receive playback commands.
-                          </p>
-                        </div>
-                      )}
-                      
-                      {deviceStatus.isMobile && !deviceStatus.isRegistered && !deviceStatus.isOnline && (
-                        <div style={{ 
-                          marginTop: '8px', 
-                          fontSize: '12px', 
-                          color: '#721c24',
-                          borderTop: '1px solid #f5c6cb',
-                          paddingTop: '8px'
-                        }}>
-                          <p style={{ margin: '0 0 4px 0' }}>
-                            <strong>📱 Mobile Device Help:</strong>
-                          </p>
-                          <p style={{ margin: '0 0 4px 0' }}>
-                            Mobile devices only appear when actively using Plex. To make this device available:
-                          </p>
-                          <ol style={{ margin: '4px 0 0 16px', padding: 0 }}>
-                            <li>Open Plex app on your device</li>
-                            <li>Start playing any video (briefly)</li>
-                            <li>The status above will turn green when ready</li>
-                          </ol>
-                        </div>
-                      )}
-                      
-                      {deviceStatus.lastChecked && (
-                        <div style={{ 
-                          marginTop: '6px', 
-                          fontSize: '11px', 
-                          color: '#666',
-                          fontStyle: 'italic'
-                        }}>
-                          Last checked: {deviceStatus.lastChecked.toLocaleTimeString()}
-                          {deviceStatus.isMobile && ' (Auto-checking every 10s)'}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  
-                  {/* Detailed Device Status Results */}
-                  {deviceStatusDetails && (
-                    <div className="detailed-device-status" style={{ 
-                      marginTop: '12px', 
-                      padding: '12px', 
-                      borderRadius: '6px',
-                      backgroundColor: '#f8f9fa',
-                      border: '1px solid #dee2e6',
-                      fontSize: '13px'
-                    }}>
-                      <h4 style={{ margin: '0 0 8px 0', color: '#333' }}>
-                        🔍 Detailed Device Status
-                      </h4>
-                      
-                      {deviceStatusDetails.error ? (
-                        <div style={{ color: '#721c24', backgroundColor: '#f8d7da', padding: '8px', borderRadius: '4px' }}>
-                          <strong>Error:</strong> {deviceStatusDetails.error}
-                        </div>
-                      ) : !deviceStatusDetails.found ? (
-                        <div style={{ color: '#856404', backgroundColor: '#fff3cd', padding: '8px', borderRadius: '4px' }}>
-                          <strong>Device Not Found:</strong> {deviceStatusDetails.message}
-                          <br />
-                          <small>Available devices: {deviceStatusDetails.availableDevices}</small>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                          {/* Basic Device Info */}
-                          <div style={{ 
-                            backgroundColor: 'white', 
-                            padding: '8px', 
-                            borderRadius: '4px', 
-                            border: '1px solid #e9ecef' 
-                          }}>
-                            <strong>📱 Device Information:</strong>
-                            <div style={{ marginLeft: '16px', marginTop: '4px' }}>
-                              <div><strong>Name:</strong> {deviceStatusDetails.device.name}</div>
-                              <div><strong>Product:</strong> {deviceStatusDetails.device.product}</div>
-                              <div><strong>Platform:</strong> {deviceStatusDetails.device.platform} {deviceStatusDetails.device.platformVersion}</div>
-                              <div><strong>Address:</strong> {deviceStatusDetails.device.address}:{deviceStatusDetails.device.port}</div>
-                              <div><strong>Type:</strong> {deviceStatusDetails.device.isRegistered ? 'Registered Device' : 'Active Client'}</div>
-                            </div>
-                          </div>
-                          
-                          {/* Responsiveness Status */}
-                          {deviceStatusDetails.responsiveness?.checked && (
-                            <div style={{ 
-                              backgroundColor: deviceStatusDetails.responsiveness.responsive ? '#d4edda' : '#f8d7da',
-                              border: `1px solid ${deviceStatusDetails.responsiveness.responsive ? '#c3e6cb' : '#f5c6cb'}`,
-                              padding: '8px', 
-                              borderRadius: '4px'
-                            }}>
-                              <strong>🔗 Device Responsiveness:</strong>
-                              <div style={{ marginLeft: '16px', marginTop: '4px' }}>
-                                <div style={{ 
-                                  color: deviceStatusDetails.responsiveness.responsive ? '#155724' : '#721c24' 
-                                }}>
-                                  <strong>Status:</strong> {deviceStatusDetails.responsiveness.responsive ? '✅ Responsive' : '❌ Not Responsive'}
-                                </div>
-                                <div><strong>Result:</strong> {deviceStatusDetails.responsiveness.result.message}</div>
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* Active Session Info */}
-                          <div style={{ 
-                            backgroundColor: deviceStatusDetails.activeSession?.hasSession ? '#d1ecf1' : 'white',
-                            border: `1px solid ${deviceStatusDetails.activeSession?.hasSession ? '#bee5eb' : '#e9ecef'}`,
-                            padding: '8px', 
-                            borderRadius: '4px'
-                          }}>
-                            <strong>🎬 Current Playback:</strong>
-                            <div style={{ marginLeft: '16px', marginTop: '4px' }}>
-                              {deviceStatusDetails.activeSession?.hasSession ? (
-                                <div>
-                                  <div style={{ color: '#0c5460' }}>
-                                    <strong>Status:</strong> ▶️ Currently Playing
-                                  </div>
-                                  <div><strong>Title:</strong> {deviceStatusDetails.activeSession.sessionInfo.title}</div>
-                                  <div><strong>Type:</strong> {deviceStatusDetails.activeSession.sessionInfo.type}</div>
-                                  <div><strong>State:</strong> {deviceStatusDetails.activeSession.sessionInfo.state}</div>
-                                  <div><strong>User:</strong> {deviceStatusDetails.activeSession.sessionInfo.user}</div>
-                                </div>
-                              ) : (
-                                <div>
-                                  <strong>Status:</strong> ⏹️ Not Currently Playing
-                                </div>
-                              )}
-                              {deviceStatusDetails.activeSession?.error && (
-                                <div style={{ color: '#856404', marginTop: '4px' }}>
-                                  <small>Note: {deviceStatusDetails.activeSession.error}</small>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {/* Timestamp */}
-                          <div style={{ 
-                            fontSize: '11px', 
-                            color: '#666', 
-                            textAlign: 'right',
-                            fontStyle: 'italic'
-                          }}>
-                            Checked: {new Date(deviceStatusDetails.timestamp).toLocaleString()}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {availablePlayers.length > 0 && availablePlayers.every(player => player.isFallback) && (
-                    <p className="collection-hint" style={{ color: '#f39c12' }}>
-                      ℹ️ Showing fallback players because no active Plex clients were detected. 
-                      These will work but actual devices (open a Plex app first) are preferred.
+                    <p className="collection-hint">
+                      {deviceStatus.checking ? '🔄 Checking...' : deviceStatus.isOnline ? `🟢 ${deviceStatus.deviceName || selectedPlayer} is connected and accepts remote control` : '🔴 Device is not currently connected to Jellyfin. Open the Jellyfin app on it and refresh.'}
                     </p>
                   )}
                   {availablePlayers.length === 0 && !playersLoading && (
-                    <div className="collection-hint">
-                      <p>⚠️ No Plex players found. This can happen if:</p>
-                      <ul style={{ marginLeft: '20px', marginTop: '8px' }}>
-                        <li>• No Plex clients are currently active/connected</li>
-                        <li>• Your Plex server URL or token is incorrect</li>
-                        <li>• Plex clients are on a different network</li>
-                      </ul>
-                      <p style={{ marginTop: '12px' }}>
-                        <strong>To fix this:</strong> Open Plex in a web browser, mobile app, or TV app, then click refresh.
-                        <br />
-                        <button 
-                          onClick={() => window.open(`${config.apiBaseUrl}/api/plex/debug`, '_blank')}
-                          style={{ 
-                            marginTop: '8px', 
-                            padding: '4px 8px', 
-                            fontSize: '12px',
-                            backgroundColor: '#666',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          🔍 Debug Connection
-                        </button>
-                      </p>
-                    </div>
-                  )}
-                  {selectedPlayer && (
                     <p className="collection-hint">
-                      ✅ Selected player will be used for remote playback when you select "Play Next Episode" from the home page.
+                      ⚠️ No remote-controllable Jellyfin clients are connected. Open a Jellyfin app (Android TV, web, etc.) and click refresh.
                     </p>
                   )}
                 </div>
@@ -1188,7 +1067,7 @@ function Settings() {
                 </label>                <p className="setting-description">
                   Filter out movies with "Christmas" labels during non-December months. During December, all movies are included.
                   <br />
-                  <small>Note: Uses actual Plex label field (not collections or genres). Requires a Plex sync to populate label data.</small>
+                  <small>Note: Uses Jellyfin tags (not collections or genres). Requires a Jellyfin sync to populate tag data.</small>
                 </p>
                 <div className="checkbox-container">
                   <input 
@@ -1216,46 +1095,21 @@ function Settings() {
             
             <div className="ignored-collections-container compact">
               <div className="ignored-collection-control compact">
-                <label htmlFor="ignored_movie_collections">🎬 Ignored Movie Collections:</label>
+                <label htmlFor="ignored_collections">🚫 Ignored Collections (movies & TV):</label>
                 <p className="setting-description">
-                  Movies from these collections will not be selected for watching
+                  Movies and shows in these collections — including collections nested inside them — will not be selected for watching
                 </p>
                 <div className="collection-checkboxes">
                   {availableCollections.map(collection => (
-                    <label key={`movie-${collection.value}`} className="collection-checkbox">
+                    <label key={`ignored-${collection.value}`} className="collection-checkbox">
                       <input
                         type="checkbox"
-                        checked={ignoredMovieCollections.includes(collection.value)}
+                        checked={ignoredCollections.includes(collection.value)}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            setIgnoredMovieCollections([...ignoredMovieCollections, collection.value]);
+                            setIgnoredCollections([...ignoredCollections, collection.value]);
                           } else {
-                            setIgnoredMovieCollections(ignoredMovieCollections.filter(c => c !== collection.value));
-                          }
-                        }}
-                      />
-                      <span className="collection-name">{collection.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="ignored-collection-control compact">
-                <label htmlFor="ignored_tv_collections">📺 Ignored TV Collections:</label>
-                <p className="setting-description">
-                  TV shows from these collections will not be selected for watching
-                </p>
-                <div className="collection-checkboxes">
-                  {availableCollections.map(collection => (
-                    <label key={`tv-${collection.value}`} className="collection-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={ignoredTVCollections.includes(collection.value)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setIgnoredTVCollections([...ignoredTVCollections, collection.value]);
-                          } else {
-                            setIgnoredTVCollections(ignoredTVCollections.filter(c => c !== collection.value));
+                            setIgnoredCollections(ignoredCollections.filter(c => c !== collection.value));
                           }
                         }}
                       />
@@ -1275,7 +1129,7 @@ function Settings() {
           <div className="settings-section compact">
             <div className="section-header compact">
               <h3>🔄 Sync Operations</h3>
-              <p>Manage Plex synchronization and background processes</p>
+              <p>Manage Jellyfin (movies & TV), Plex (music) and background sync processes</p>
             </div>
 
             <div className="sync-tab-nav">
@@ -1293,16 +1147,111 @@ function Settings() {
               >
                 📜 Plex Sync Log
               </button>
+              <button
+                type="button"
+                onClick={() => setSyncOperationsTab('jellyfin-log')}
+                className={`sync-tab-button ${syncOperationsTab === 'jellyfin-log' ? 'active' : ''}`}
+              >
+                📜 Jellyfin Sync Log
+              </button>
             </div>
 
             {syncOperationsTab === 'operations' && (
             <>
+            {/* Jellyfin (Movies & TV) */}
+            <div className="sync-subsection">
+              <h4 className="subsection-title">🎞️ Jellyfin Library (Movies & TV)</h4>
+              <div className="sync-config-row">
+                <div className="sync-interval-control compact">
+                  <label htmlFor="jellyfin_sync_interval">Jellyfin Sync Interval: {jellyfinSyncInterval}h</label>
+                  <input
+                    type="range"
+                    id="jellyfin_sync_interval"
+                    name="jellyfin_sync_interval"
+                    min="1"
+                    max="168"
+                    value={jellyfinSyncInterval}
+                    onChange={(e) => setJellyfinSyncInterval(parseInt(e.target.value, 10))}
+                    className="interval-slider"
+                  />
+                </div>
+                <div className="background-sync-controls compact">
+                  <Button
+                    onClick={handleJellyfinSync}
+                    disabled={jellyfinSyncLoading || jellyfinSyncStatus?.isSyncing}
+                    className="sync-button primary compact"
+                  >
+                    {jellyfinSyncLoading || jellyfinSyncStatus?.isSyncing ? '🔄 Syncing...' : '🔄 Sync Jellyfin'}
+                  </Button>
+                  <Button
+                    onClick={() => handleJellyfinBackgroundAction('start')}
+                    disabled={jellyfinBackgroundStatus?.isRunning}
+                    className="sync-button start compact"
+                  >
+                    ▶️ Start
+                  </Button>
+                  <Button
+                    onClick={() => handleJellyfinBackgroundAction('stop')}
+                    disabled={!jellyfinBackgroundStatus?.isRunning}
+                    className="sync-button stop compact"
+                  >
+                    ⏹️ Stop
+                  </Button>
+                </div>
+              </div>
+              {jellyfinSyncStatus && (
+                <div className="sync-status-card compact">
+                  <div className="status-grid compact">
+                    <div className="status-item compact">
+                      <span className="status-label">Libraries:</span>
+                      <span className="status-value">{jellyfinSyncStatus.sections || 0}</span>
+                    </div>
+                    <div className="status-item compact">
+                      <span className="status-label">Movies:</span>
+                      <span className="status-value">{jellyfinSyncStatus.movies || 0}</span>
+                    </div>
+                    <div className="status-item compact">
+                      <span className="status-label">Shows:</span>
+                      <span className="status-value">{jellyfinSyncStatus.shows || 0}</span>
+                    </div>
+                    <div className="status-item compact">
+                      <span className="status-label">Episodes:</span>
+                      <span className="status-value">{jellyfinSyncStatus.episodes || 0}</span>
+                    </div>
+                    <div className="status-item compact">
+                      <span className="status-label">Collections:</span>
+                      <span className="status-value">{jellyfinSyncStatus.collections || 0}</span>
+                    </div>
+                    <div className="status-item compact">
+                      <span className="status-label">Background:</span>
+                      <span className={`status-value ${jellyfinBackgroundStatus?.isRunning ? 'running' : 'stopped'}`}>
+                        {jellyfinBackgroundStatus?.isRunning ? '✅ Running' : '❌ Stopped'}
+                      </span>
+                    </div>
+                    {jellyfinSyncStatus.lastSync && (
+                      <div className="status-item compact last-sync-item">
+                        <span className="status-label">Last Sync:</span>
+                        <span className="status-value last-sync-time" title={new Date(jellyfinSyncStatus.lastSync).toLocaleString()}>
+                          {new Date(jellyfinSyncStatus.lastSync).toLocaleDateString()} {new Date(jellyfinSyncStatus.lastSync).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {jellyfinSyncMessage && (
+                <div className="sync-message compact">
+                  <p>{jellyfinSyncMessage}</p>
+                </div>
+              )}
+            </div>
+
             {/* Background Sync */}
             <div className="sync-subsection">
               <h4 className="subsection-title">🔄 Background Sync</h4>
               <div className="sync-config-row">
                 <div className="sync-interval-control compact">
-                  <label htmlFor="plex_sync_interval">Plex Sync Interval: {plexSyncInterval}h</label>
+                  <label htmlFor="plex_sync_interval">Plex (Music) Sync Interval: {plexSyncInterval}h</label>
                   <input 
                     type="range" 
                     id="plex_sync_interval"
@@ -1421,7 +1370,7 @@ function Settings() {
                   disabled={plexSyncLoading}
                   className="sync-button primary compact"
                 >
-                  {plexSyncLoading ? '🔄 Syncing...' : '🔄 Sync Plex'}
+                  {plexSyncLoading ? '🔄 Syncing...' : '🎵 Sync Plex Music'}
                 </Button>
                 
                 <Button
@@ -1478,6 +1427,59 @@ function Settings() {
               )}
             </div>
             </>
+            )}
+
+            {syncOperationsTab === 'jellyfin-log' && (
+              <div className="sync-subsection">
+                <div className="library-sync-row">
+                  <Button
+                    onClick={fetchJellyfinStatus}
+                    className="sync-button secondary compact"
+                  >
+                    🔄 Refresh Log
+                  </Button>
+                </div>
+                <div className="sync-log-list">
+                  {jellyfinSyncRunLogs.length === 0 ? (
+                    <div className="sync-status-card compact">
+                      <p>No Jellyfin sync log entries yet. Run a Jellyfin sync to create the first entry.</p>
+                    </div>
+                  ) : (
+                    jellyfinSyncRunLogs.map((log) => (
+                      <div key={log.id} className="sync-status-card compact sync-log-entry">
+                        <div className="status-row">
+                          <span className="status-label">Run:</span>
+                          <span className="status-value">#{log.id}</span>
+                          <span className="status-label">Trigger:</span>
+                          <span className="status-value">{log.trigger}</span>
+                          <span className="status-label">Status:</span>
+                          <span className={`status-value ${log.success ? 'running' : 'stopped'}`}>
+                            {log.success ? 'Success' : 'Failed'}
+                          </span>
+                        </div>
+                        <div className="status-row">
+                          <span className="status-label">Completed:</span>
+                          <span className="status-value">{new Date(log.completedAt).toLocaleString()}</span>
+                          <span className="status-label">Duration:</span>
+                          <span className="status-value">{Number(log.durationSeconds || 0).toFixed(2)}s</span>
+                        </div>
+                        {log.summary && (
+                          <div className="status-row">
+                            <span className="status-label">Summary:</span>
+                            <span className="status-value">{log.summary}</span>
+                          </div>
+                        )}
+                        {log.error && (
+                          <div className="status-row">
+                            <span className="status-label">Error:</span>
+                            <span className="status-value">{log.error}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             )}
 
             {syncOperationsTab === 'plex-log' && (

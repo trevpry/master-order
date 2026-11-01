@@ -401,103 +401,66 @@ function createPlaybackControlRoutes() {
       let foundMediaMetadata = null;
       
       try {
-        // Get Plex settings
-        const settings = await prisma.settings.findFirst();
-        if (!settings?.plexUrl || !settings?.plexToken) {
-          return res.status(500).json({
-            type: 'PLAY_ERROR',
-            data: {
-              error: 'Plex not configured',
-              message: 'Plex server URL and token are required'
-            }
+        // Look the media up in the Jellyfin-synced library tables (all movie/TV libraries)
+        if (isEpisodeRequest) {
+          const shows = await prisma.plexTVShow.findMany({
+            where: { removed: false, title: { not: null } },
+            select: { ratingKey: true, title: true, art: true }
           });
-        }
-        
-        // Search for the media in Plex
-        const searchUrl = `${settings.plexUrl}/search?query=${encodeURIComponent(mediaTitle)}&X-Plex-Token=${settings.plexToken}`;
-        const searchResponse = await fetch(searchUrl);
-        
-        if (searchResponse.ok) {
-          const searchData = await searchResponse.text();
-          const xml2js = require('xml2js');
-          const parser = new xml2js.Parser();
-          const result = await parser.parseStringPromise(searchData);
-          
-          if (isEpisodeRequest) {
-            // Look for TV series first for episode requests
-            const tvResults = result?.MediaContainer?.Directory?.filter(item => 
-              item.$.type === 'show' && 
-              item.$.title.toLowerCase() === seriesTitle.toLowerCase()
-            ) || [];
-            
-            if (tvResults.length > 0) {
-              // Found TV series, now get episodes
-              const seriesRatingKey = tvResults[0].$.ratingKey;
-              const episodesUrl = `${settings.plexUrl}/library/metadata/${seriesRatingKey}/allLeaves?X-Plex-Token=${settings.plexToken}`;
-              const episodesResponse = await fetch(episodesUrl);
-              
-              if (episodesResponse.ok) {
-                const episodesData = await episodesResponse.text();
-                const episodesResult = await parser.parseStringPromise(episodesData);
-                
-                // Find the specific episode
-                const episodes = episodesResult?.MediaContainer?.Video || [];
-                const targetEpisode = episodes.find(ep => 
-                  parseInt(ep.$.parentIndex) === seasonNumber && 
-                  parseInt(ep.$.index) === episodeNumber
-                );
-                
-                if (targetEpisode) {
-                  episodeRatingKey = targetEpisode.$.ratingKey;
-                  foundMediaMetadata = {
-                    type: 'episode',
-                    ratingKey: targetEpisode.$.ratingKey,
-                    title: targetEpisode.$.title,
-                    seriesTitle: tvResults[0].$.title,
-                    seasonNumber: parseInt(targetEpisode.$.parentIndex),
-                    episodeNumber: parseInt(targetEpisode.$.index),
-                    summary: targetEpisode.$.summary || '',
-                    duration: parseInt(targetEpisode.$.duration) || 0,
-                    thumb: targetEpisode.$.thumb || '',
-                    art: targetEpisode.$.art || tvResults[0].$.art || '',
-                    seriesRatingKey: seriesRatingKey
-                  };
-                  console.log(`✅ Found episode rating key: ${episodeRatingKey}`);
-                }
-              }
+          const wantedSeries = String(seriesTitle || '').toLowerCase();
+          const show = shows.find(s => String(s.title).toLowerCase() === wantedSeries);
+          if (show) {
+            const episode = await prisma.plexEpisode.findFirst({
+              where: { grandparentRatingKey: show.ratingKey, seasonIndex: Number(seasonNumber), index: Number(episodeNumber), removed: false }
+            });
+            if (episode) {
+              episodeRatingKey = episode.ratingKey;
+              foundMediaMetadata = {
+                type: 'episode',
+                ratingKey: episode.ratingKey,
+                title: episode.title,
+                seriesTitle: show.title,
+                seasonNumber: episode.seasonIndex,
+                episodeNumber: episode.index,
+                summary: episode.summary || '',
+                duration: episode.duration || 0,
+                thumb: episode.thumb || '',
+                art: show.art || '',
+                seriesRatingKey: show.ratingKey
+              };
+              console.log(`✅ Found episode item id: ${episodeRatingKey}`);
             }
           }
-          
-          // Look for movies (either for movie requests or as fallback for episode requests)
-          if (!episodeRatingKey) {
-            const movieResults = result?.MediaContainer?.Video?.filter(item => 
-              item.$.type === 'movie' && 
-              (item.$.title.toLowerCase() === mediaTitle.toLowerCase() ||
-               item.$.title.toLowerCase().includes(mediaTitle.toLowerCase()))
-            ) || [];
-            
-            if (movieResults.length > 0) {
-              const movie = movieResults[0];
-              movieRatingKey = movie.$.ratingKey;
-              foundMediaMetadata = {
-                type: 'movie',
-                ratingKey: movie.$.ratingKey,
-                title: movie.$.title,
-                year: parseInt(movie.$.year) || null,
-                duration: parseInt(movie.$.duration) || 0,
-                summary: movie.$.summary || '',
-                studio: movie.$.studio || '',
-                rating: parseFloat(movie.$.rating) || 0,
-                thumb: movie.$.thumb || '',
-                art: movie.$.art || '',
-                originallyAvailableAt: movie.$.originallyAvailableAt || null
-              };
-              console.log(`✅ Found movie rating key: ${movieRatingKey}`);
-            }
+        }
+
+        // Look for movies (either for movie requests or as fallback for episode requests)
+        if (!episodeRatingKey) {
+          const movies = await prisma.plexMovie.findMany({
+            where: { removed: false, title: { not: null } }
+          });
+          const wanted = String(mediaTitle || '').toLowerCase();
+          const movie = movies.find(m => String(m.title).toLowerCase() === wanted)
+            || movies.find(m => String(m.title).toLowerCase().includes(wanted));
+          if (movie) {
+            movieRatingKey = movie.ratingKey;
+            foundMediaMetadata = {
+              type: 'movie',
+              ratingKey: movie.ratingKey,
+              title: movie.title,
+              year: movie.year || null,
+              duration: movie.duration || 0,
+              summary: movie.summary || '',
+              studio: movie.studio || '',
+              rating: movie.rating || 0,
+              thumb: movie.thumb || '',
+              art: movie.art || '',
+              originallyAvailableAt: movie.originallyAvailableAt || null
+            };
+            console.log(`✅ Found movie item id: ${movieRatingKey}`);
           }
         }
       } catch (plexError) {
-        console.warn('⚠️ Failed to search Plex for media:', plexError.message);
+        console.warn('⚠️ Failed to look up media in library:', plexError.message);
       }
       
       // Use the found rating key or return error
@@ -508,7 +471,7 @@ function createPlaybackControlRoutes() {
           type: 'PLAY_ERROR',
           data: {
             error: 'Media not found',
-            message: `Could not find ${mediaTitle}${isEpisodeRequest ? ` S${seasonNumber}E${episodeNumber}` : ''} in Plex library`,
+            message: `Could not find ${mediaTitle}${isEpisodeRequest ? ` S${seasonNumber}E${episodeNumber}` : ''} in the Jellyfin library`,
             mediaTitle,
             mediaType,
             ...(isEpisodeRequest && { seasonNumber, episodeNumber })

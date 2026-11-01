@@ -29,7 +29,13 @@ function getAndroidArtworkUrl(media, baseUrl) {
     return null;
   }
 
-  // First priority: Check for cached artwork (works for all media types)
+  // TV episodes always use the Jellyfin season artwork when available
+  if (media?.seasonArtwork) {
+    console.log('📱 Using Jellyfin season artwork:', media.seasonArtwork);
+    return `${baseUrl}/api/artwork${media.seasonArtwork}`;
+  }
+
+  // Next: cached artwork (works for all media types)
   if (media?.localArtworkPath) {
     const filename = media.localArtworkPath.includes('\\') || media.localArtworkPath.includes('/')
       ? media.localArtworkPath.split(/[\\\/]/).pop()

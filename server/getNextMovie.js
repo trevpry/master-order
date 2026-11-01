@@ -84,16 +84,9 @@ async function selectInitialMovie(movies) {
   const partiallyWatchedPercent = settings.partiallyWatchedCollectionPercent || 75;
   const christmasFilterEnabled = settings.christmasFilterEnabled || false;
   
-  // Parse ignored collections from JSON string
-  let ignoredMovieCollections = [];
-  if (settings.ignoredMovieCollections && typeof settings.ignoredMovieCollections === 'string') {
-    try {
-      ignoredMovieCollections = JSON.parse(settings.ignoredMovieCollections);
-    } catch (e) {
-      console.warn('Failed to parse ignoredMovieCollections JSON:', e);
-      ignoredMovieCollections = [];
-    }
-  }
+  // Collections are unified across movies and TV
+  const ignoredMovieCollections = require('./utils/collectionSettings').getIgnoredCollections(settings);
+  const ignoredLower = new Set(ignoredMovieCollections.map(c => c.toLowerCase()));
   
   console.log(`🎯 Using ${partiallyWatchedPercent}% priority for partially watched collections`);
   if (ignoredMovieCollections.length > 0) {
@@ -144,10 +137,10 @@ async function selectInitialMovie(movies) {
   const filteredMovies = moviesToFilter.filter(movie => {
     const movieCollections = plexDb.parseCollections(movie.collections || '');
     const hasIgnoredCollection = movieCollections.some(collection => 
-      ignoredMovieCollections.includes(collection)
+      ignoredLower.has(String(collection).toLowerCase())
     );
     if (hasIgnoredCollection) {
-      console.log(`🚫 Excluding movie "${movie.title}" - found in ignored collection(s): ${movieCollections.filter(c => ignoredMovieCollections.includes(c)).join(', ')}`);
+      console.log(`🚫 Excluding movie "${movie.title}" - found in ignored collection(s): ${movieCollections.filter(c => ignoredLower.has(String(c).toLowerCase())).join(', ')}`);
       return false;
     }
     return true;

@@ -8,6 +8,7 @@ const getNextEpisode = require('../getNextEpisode');
 const getNextMovie = require('../getNextMovie');
 const { getNextCustomOrder } = require('../getNextCustomOrder');
 const HistoryPlusService = require('./historyPlusService');
+const { applySeasonArtwork } = require('../utils/seasonArtwork');
 
 const historyPlusService = new HistoryPlusService();
 
@@ -76,6 +77,11 @@ async function tryGetHistoryPlusContent(mediaTypeLimiters) {
  * @returns {object} The resolved up next content data
  */
 async function resolveUpNext(req) {
+  const result = await resolveUpNextContent(req);
+  return applySeasonArtwork(result);
+}
+
+async function resolveUpNextContent(req) {
   const data = await getNextEpisode(); // Handles order type selection internally
 
   if (data.orderType === 'MOVIES_GENERAL') {

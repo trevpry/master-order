@@ -54,6 +54,8 @@ async function getSettings() {
     if (!settings.ignoredTVCollections) {
       settings.ignoredTVCollections = [];
     }
+    // Unified list (movies + TV share collections in Jellyfin)
+    settings.ignoredCollections = require('./utils/collectionSettings').getIgnoredCollections(settings);
 
     return settings;
   } catch (error) {
@@ -75,7 +77,8 @@ async function getSettings() {
       komgaApiKey: null,
       komgaUrl: null,
       ignoredMovieCollections: [],
-      ignoredTVCollections: []
+      ignoredTVCollections: [],
+      ignoredCollections: []
     };
   }
 }

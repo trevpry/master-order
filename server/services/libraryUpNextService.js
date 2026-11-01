@@ -49,7 +49,7 @@ async function getArrMovieSelectionSettings() {
       partiallyWatchedCollectionPercent: Number.isFinite(settings?.partiallyWatchedCollectionPercent)
         ? settings.partiallyWatchedCollectionPercent
         : 75,
-      ignoredMovieCollections: parseJsonArraySetting(settings?.ignoredMovieCollections),
+      ignoredMovieCollections: settings?.ignoredCollections || parseJsonArraySetting(settings?.ignoredMovieCollections),
     };
   } catch (error) {
     return {
@@ -64,7 +64,7 @@ async function getArrTvSelectionSettings() {
     const settings = await settingsService.getSettings();
     return {
       collectionName: settings?.collectionName ? String(settings.collectionName).trim() : '',
-      ignoredTVCollections: parseJsonArraySetting(settings?.ignoredTVCollections),
+      ignoredTVCollections: settings?.ignoredCollections || parseJsonArraySetting(settings?.ignoredTVCollections),
     };
   } catch (error) {
     return {
