@@ -44,6 +44,16 @@ function createContentDiscoveryRoutes() {
       
       // Format the resolved data into Android response structure
       const androidResponse = formatAndroidResponse(upNextData, baseUrl);
+      if (androidResponse?.data) {
+        androidResponse.data.backgroundArtUrl = upNextData.backgroundArt ? `${baseUrl}/api/artwork${upNextData.backgroundArt}` : '';
+        androidResponse.data.tvdbStatus = upNextData.tvdbStatus || null;
+        androidResponse.data.collectionArtwork = (upNextData.collectionArtwork || []).map((collection) => ({
+          title: collection.title,
+          jellyfinId: collection.jellyfinId,
+          depth: collection.depth,
+          artworkUrl: collection.thumb ? `${baseUrl}/api/artwork${collection.thumb}` : ''
+        }));
+      }
       
       console.log('📱 Sending Android companion up next response:', JSON.stringify(androidResponse, null, 2));
       res.json(androidResponse);

@@ -69,4 +69,74 @@ async function applySeasonArtwork(media) {
   return media;
 }
 
-module.exports = { resolveSeasonArtworkPath, applySeasonArtwork };
+const backdropCache = new Map();
+const BACKDROP_TTL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Resolve the Jellyfin backdrop path for an item: its own backdrop, otherwise the
+ * backdrop Jellyfin inherits from a parent (e.g. a season without backdrops uses the series).
+ */
+async function resolveItemBackdropPath(itemId, fallbackPath = null) {
+  if (!itemId || !JELLYFIN_ID.test(String(itemId))) return fallbackPath;
+  const cached = backdropCache.get(itemId);
+  if (cached && Date.now() - cached.at < BACKDROP_TTL_MS) return cached.path || fallbackPath;
+  try {
+    const jellyfin = require('../services/jellyfinService');
+    const item = await jellyfin.getItem(itemId);
+    let path = null;
+    if (item?.BackdropImageTags?.length) {
+      path = `/Items/${item.Id}/Images/Backdrop`;
+    } else if (item?.ParentBackdropItemId && item?.ParentBackdropImageTags?.length) {
+      path = `/Items/${item.ParentBackdropItemId}/Images/Backdrop`;
+    }
+    backdropCache.set(itemId, { path, at: Date.now() });
+    return path || fallbackPath;
+  } catch (error) {
+    console.warn(`Failed to resolve Jellyfin backdrop for ${itemId}:`, error.message);
+    return fallbackPath;
+  }
+}
+
+/**
+ * Attach `backgroundArt` (relative Jellyfin backdrop path) for TV episodes (season backdrop,
+ * inheriting the series backdrop) and movies.
+ */
+async function applyBackgroundArtwork(media) {
+  if (!media || media.libraryProvider === 'arr') return media;
+  try {
+    if (isEpisodeResult(media)) {
+      const isEpisodeRow = media.customOrderMediaType === 'episode' || !!media.grandparentRatingKey;
+      const episodeKey = media.episodeRatingKey || (isEpisodeRow ? media.ratingKey : null) || media.plexKey;
+      let seasonKey = null;
+      let showKey = media.grandparentRatingKey || (isEpisodeRow ? null : media.ratingKey);
+      if (episodeKey && JELLYFIN_ID.test(String(episodeKey))) {
+        const episode = await prisma.plexEpisode.findUnique({
+          where: { ratingKey: String(episodeKey) },
+          select: { seasonRatingKey: true, grandparentRatingKey: true }
+        });
+        seasonKey = episode?.seasonRatingKey || null;
+        showKey = showKey || episode?.grandparentRatingKey;
+      }
+      const show = showKey && JELLYFIN_ID.test(String(showKey))
+        ? await prisma.plexTVShow.findUnique({ where: { ratingKey: String(showKey) }, select: { art: true } })
+        : null;
+      const backgroundArt = await resolveItemBackdropPath(seasonKey || showKey, show?.art || null);
+      if (backgroundArt) media.backgroundArt = backgroundArt;
+      return media;
+    }
+
+    const isMovie = media.type === 'movie' || media.customOrderMediaType === 'movie' || media.orderType === 'MOVIES_GENERAL';
+    if (isMovie) {
+      const movieKey = [media.plexKey, media.ratingKey].find(key => key && JELLYFIN_ID.test(String(key)));
+      const fallback = typeof media.art === 'string' && media.art.startsWith('/Items/') ? media.art : null;
+      const backgroundArt = movieKey ? await resolveItemBackdropPath(movieKey, fallback) : fallback;
+      if (backgroundArt) media.backgroundArt = backgroundArt;
+    }
+  } catch (error) {
+    console.warn('Failed to resolve background artwork:', error.message);
+  }
+  return media;
+}
+
+module.exports = { resolveSeasonArtworkPath, applySeasonArtwork, applyBackgroundArtwork, resolveItemBackdropPath };
+

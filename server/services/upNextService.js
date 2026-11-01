@@ -8,7 +8,9 @@ const getNextEpisode = require('../getNextEpisode');
 const getNextMovie = require('../getNextMovie');
 const { getNextCustomOrder } = require('../getNextCustomOrder');
 const HistoryPlusService = require('./historyPlusService');
-const { applySeasonArtwork } = require('../utils/seasonArtwork');
+const { applySeasonArtwork, applyBackgroundArtwork } = require('../utils/seasonArtwork');
+const { applyTvdbEpisodeStatus } = require('./tvdbEpisodeStatusService');
+const { applyCollectionArtwork } = require('../utils/collectionArtwork');
 
 const historyPlusService = new HistoryPlusService();
 
@@ -78,7 +80,10 @@ async function tryGetHistoryPlusContent(mediaTypeLimiters) {
  */
 async function resolveUpNext(req) {
   const result = await resolveUpNextContent(req);
-  return applySeasonArtwork(result);
+  await applySeasonArtwork(result);
+  await applyTvdbEpisodeStatus(result);
+  await applyCollectionArtwork(result);
+  return applyBackgroundArtwork(result);
 }
 
 async function resolveUpNextContent(req) {
