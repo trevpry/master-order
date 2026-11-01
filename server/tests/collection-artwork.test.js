@@ -9,6 +9,7 @@ const { applyCollectionArtwork } = require('../utils/collectionArtwork');
 
 const SERIES = 'a'.repeat(32);
 const EPISODE = 'b'.repeat(32);
+const MOVIE = 'c'.repeat(32);
 
 function makePrisma() {
   const collections = {
@@ -19,6 +20,8 @@ function makePrisma() {
   const links = [
     { collectionId: 1, itemKey: SERIES, childCollectionId: null },
     { collectionId: 2, itemKey: SERIES, childCollectionId: null },
+    { collectionId: 1, itemKey: MOVIE, childCollectionId: null },
+    { collectionId: 2, itemKey: MOVIE, childCollectionId: null },
     { collectionId: 3, itemKey: collections[2].jellyfinId, childCollectionId: 2 }
   ];
   return {
@@ -47,8 +50,39 @@ test('custom-order and TV-pick episodes get identical collection artwork, includ
   ]);
 });
 
-test('non-episode content is left untouched', async () => {
-  const movie = { type: 'movie', ratingKey: SERIES };
+test('general and custom-order movies get the same collection posters and ancestor artwork', async () => {
+  const prisma = makePrisma();
+  const movie = { type: 'movie', ratingKey: MOVIE, orderType: 'MOVIES_GENERAL' };
+  const customOrder = { type: 'movie', customOrderMediaType: 'movie', ratingKey: 'order-item', plexKey: MOVIE };
+  await applyCollectionArtwork(movie, prisma);
+  await applyCollectionArtwork(customOrder, prisma);
+  assert.deepEqual(movie.collectionArtwork, customOrder.collectionArtwork);
+  assert.deepEqual(movie.collectionArtwork.map(c => [c.title, c.depth]), [
+    ['Star Trek Collection', 0],
+    ['Sci-Fi Universe', 1]
+  ]);
+  assert.equal(movie.collectionArtwork[0].thumb, '/Items/2/Images/Primary');
+});
+
+test('movie order payloads without an explicit type still receive collection artwork', async () => {
+  const movie = { orderType: 'MOVIES_GENERAL', ratingKey: MOVIE };
   await applyCollectionArtwork(movie, makePrisma());
-  assert.equal(movie.collectionArtwork, undefined);
+  assert.equal(movie.collectionArtwork.length, 2);
+});
+
+test('movies without collections return an empty artwork list', async () => {
+  const movie = { type: 'movie', ratingKey: 'd'.repeat(32) };
+  await applyCollectionArtwork(movie, makePrisma());
+  assert.deepEqual(movie.collectionArtwork, []);
+});
+
+test('non-video, Arr-backed and legacy Plex content is left untouched', async () => {
+  for (const media of [
+    { type: 'book', ratingKey: MOVIE },
+    { type: 'movie', ratingKey: MOVIE, libraryProvider: 'arr' },
+    { type: 'movie', ratingKey: '123' }
+  ]) {
+    await applyCollectionArtwork(media, makePrisma());
+    assert.equal(media.collectionArtwork, undefined);
+  }
 });

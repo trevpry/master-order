@@ -15,6 +15,7 @@ const express = require('express');
 
 // Import required services and utilities
 const prisma = require('../prismaClient');
+const { selectRandomUnwatchedScene } = require('../services/stashRandomSceneService');
 const StashSyncService = require('../stashSyncService');
 const StashSyncServiceOptimized = require('../stashSyncServiceOptimized');
 const StashBackgroundSyncService = require('../stashBackgroundSyncService');
@@ -808,59 +809,29 @@ router.get('/scenes', asyncHandler(async (req, res) => {
 router.get('/scenes/next', asyncHandler(async (req, res) => {
   console.log('🎲 Getting random unwatched scene...');
   
-  // Find scenes with play_count = 0 or null, and exclude scenes with "__Watched" tag
-  const unwatchedScenes = await prisma.stashScene.findMany({
-    where: {
-      AND: [
-        // Play count is 0 or null
-        {
-          OR: [
-            { playCount: 0 },
-            { playCount: null }
-          ]
-        },
-        // Exclude scenes with "__Watched" tag
-          {
-            NOT: {
-              tags: {
-                some: {
-                  tag: {
-                    name: '__Watched'
-                  }
-                }
-              }
-            }
-          }
-        ]
-      },
+  const { scene: randomScene, totalUnwatched } = await selectRandomUnwatchedScene(prisma, {
+    performers: {
       include: {
-        performers: {
-          include: {
-            performer: true
-          }
-        },
-        tags: {
-          include: {
-            tag: true
-          }
-        },
-        studioObject: true
+        performer: true
       }
-    });
+    },
+    tags: {
+      include: {
+        tag: true
+      }
+    },
+    studioObject: true
+  });
 
-    console.log(`📊 Found ${unwatchedScenes.length} unwatched scenes (excluding "__Watched" tags)`);
+    console.log(`📊 Found ${totalUnwatched} unwatched scenes (excluding "__Watched" tags)`);
 
-    if (unwatchedScenes.length === 0) {
+    if (!randomScene) {
       return res.json({
         success: false,
         message: 'No unwatched scenes available (all scenes have been watched)',
         scene: null
       });
     }
-
-    // Select a random scene from the unwatched scenes
-    const randomIndex = Math.floor(Math.random() * unwatchedScenes.length);
-    const randomScene = unwatchedScenes[randomIndex];
 
     console.log(`🎯 Selected random scene: ${randomScene.title} (ID: ${randomScene.id})`);
 
@@ -936,8 +907,8 @@ router.get('/scenes/next', asyncHandler(async (req, res) => {
     res.json({
       success: true,
       scene: transformedScene,
-      totalUnwatched: unwatchedScenes.length,
-      message: `Selected 1 of ${unwatchedScenes.length} unwatched scenes`
+      totalUnwatched,
+      message: `Selected 1 of ${totalUnwatched} unwatched scenes`
     });
 }));
 

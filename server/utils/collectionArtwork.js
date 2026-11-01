@@ -69,17 +69,21 @@ async function getCollectionsForItem(itemKey, prisma, { exclude = [] } = {}) {
 }
 
 /**
- * Attach `media.collectionArtwork` for TV episodes: the Jellyfin collections the episode's
- * series belongs to (plus parent collections), excluding the Up Next settings collection.
+ * Attach the movie's or episode series' Jellyfin collections (plus parent
+ * collections), excluding the Up Next settings collection.
  */
 async function applyCollectionArtwork(media, prisma = require('../prismaClient')) {
   if (!media || media.libraryProvider === 'arr') return media;
-  if (media.type !== 'episode' && media.customOrderMediaType !== 'episode') return media;
+  const isEpisode = media.type === 'episode' || media.customOrderMediaType === 'episode';
+  const isMovie = media.type === 'movie' || media.customOrderMediaType === 'movie' || media.orderType === 'MOVIES_GENERAL';
+  if (!isEpisode && !isMovie) return media;
   try {
-    const seriesKey = await resolveEpisodeSeriesKey(media, prisma);
-    if (!seriesKey) return media;
+    const itemKey = isEpisode
+      ? await resolveEpisodeSeriesKey(media, prisma)
+      : [media.plexKey, media.ratingKey].find(key => key && JELLYFIN_ID.test(String(key)));
+    if (!itemKey) return media;
     const settings = await prisma.settings.findUnique({ where: { id: 1 }, select: { collectionName: true } });
-    media.collectionArtwork = await getCollectionsForItem(seriesKey, prisma, {
+    media.collectionArtwork = await getCollectionsForItem(itemKey, prisma, {
       exclude: [settings?.collectionName]
     });
   } catch (error) {

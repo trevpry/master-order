@@ -214,7 +214,19 @@ npm start
 
 ## Configuration
 
+### Stash Random Scene Selection
+Android and web Next Scene count eligible unwatched rows and retrieve a single
+random row, instead of loading every scene and its relationships. Android reads
+the selected row directly and supplies artwork proxy URLs without waiting for
+Stash GraphQL; image loading is independent of scene selection. Unwatched means
+a zero/null play count and no `__Watched` tag. No client timeout increase is needed.
+
 ### Collection Settings
+Android Up Next shows collection posters for both movies and episodes. Movie
+posters use the selected movie's memberships; episodes use the series'
+memberships. Both include ancestor collections and exclude the configured
+Now Watching/TV selection collection.
+
 Configure which Jellyfin collection to use for initial TV series selection (for example, Now Watching), and which collections to ignore, in the Settings page. This collection does not restrict initial movie selection.
 Jellyfin collections can mix movies and shows and can contain other collections: an item belongs to a collection if it is in it directly or in any collection nested inside it, and ignoring a collection ignores everything nested within it.
 

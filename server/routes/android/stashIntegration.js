@@ -6,6 +6,7 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse } = require('./utilities/androidHelpers');
+const { selectRandomUnwatchedScene } = require('../../services/stashRandomSceneService');
 
 const CLIP_FILTER_QUERY_KEYS = ['search', 'watched', 'rating', 'includeHigherRatings', 'tags'];
 
@@ -508,19 +509,10 @@ function createStashIntegrationRoutes(prisma, io) {
     try {
       const baseUrl = getAndroidApiBaseUrl();
       
-      // Get next scene using existing logic
-      const nextSceneResponse = await fetch(`${baseUrl}/api/stash/scenes/next`);
-      
-      if (!nextSceneResponse.ok) {
-        const errorText = await nextSceneResponse.text();
-        console.error('Failed to get next scene:', errorText);
-        return res.status(500).json({ 
-          error: 'Failed to get next scene',
-          details: errorText 
-        });
-      }
-      
-      const nextSceneData = await nextSceneResponse.json();
+      const nextSceneData = await selectRandomUnwatchedScene(prisma, {
+        performers: { include: { performer: { select: { name: true } } } },
+        studioObject: { select: { name: true } }
+      });
       
       if (!nextSceneData || !nextSceneData.scene) {
         return res.status(404).json({ 
@@ -538,25 +530,8 @@ function createStashIntegrationRoutes(prisma, io) {
         stashUrl = stashUrl.replace(/\/+$/, '');
       }
       
-      // Get scene details with performers and studio
-      const sceneDetails = await prisma.stashScene.findUnique({
-        where: { id: scene.id },
-        include: {
-          performers: {
-            include: {
-              performer: {
-                select: { name: true }
-              }
-            }
-          },
-          studioObject: {
-            select: { name: true }
-          }
-        }
-      });
-      
-      const performers = sceneDetails?.performers?.map(p => p.performer.name).join(', ') || '';
-      const studio = sceneDetails?.studioObject?.name || '';
+      const performers = scene.performers.map(p => p.performer.name).join(', ');
+      const studio = scene.studioObject?.name || '';
       
       // Extract title from path if no title exists
       let title = scene.title;
@@ -564,53 +539,12 @@ function createStashIntegrationRoutes(prisma, io) {
         title = scene.path ? scene.path.split('/').pop().replace(/\.[^/.]+$/, '') : 'Unknown Scene';
       }
       
-      // Get Stash artwork (if available)
-      let artwork = null;
-      if (stashUrl && scene.id) {
-        try {
-          const stashQuery = `
-            query FindScene($id: ID!) {
-              findScene(id: $id) {
-                id
-                paths {
-                  screenshot
-                  preview  
-                  stream
-                  webp
-                }
-              }
-            }
-          `;
-          
-          const stashResponse = await fetch(`${stashUrl}/graphql`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'ApiKey': settings?.stashApiKey || ''
-            },
-            body: JSON.stringify({
-              query: stashQuery,
-              variables: { id: scene.id }
-            })
-          });
-          
-          if (stashResponse.ok) {
-            const stashData = await stashResponse.json();
-            const paths = stashData.data?.findScene?.paths;
-            if (paths) {
-              // Convert to full URLs for Android app
-              artwork = {
-                screenshot: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/screenshot`,
-                preview: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/preview`,
-                stream: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/stream`,
-                webp: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/webp`
-              };
-            }
-          }
-        } catch (error) {
-          console.warn('Failed to get Stash artwork:', error.message);
-        }
-      }
+      const artwork = stashUrl ? {
+        screenshot: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/screenshot`,
+        preview: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/preview`,
+        stream: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/stream`,
+        webp: `${baseUrl}/api/stash/image-proxy/scene/${scene.id}/webp`
+      } : null;
       
       // Create Android response in expected PLAY_SCENE format
       const androidResponse = {
