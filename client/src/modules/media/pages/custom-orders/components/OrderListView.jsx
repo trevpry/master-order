@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import Button from '../../../../../shared/components/Button';
 import EmptyState from './EmptyState';
 import OrderCard from './OrderCard';
@@ -38,6 +38,12 @@ const OrderListView = ({
   orderHierarchyFilter,
   setOrderHierarchyFilter
 }) => {
+  const editFormRef = useRef(null);
+  const editingOrderId = editingOrder?.id;
+  useEffect(() => {
+    if (editingOrderId) editFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [editingOrderId]);
+
   const handleCreateFormToggle = () => {
     setShowCreateForm(!showCreateForm);
     setFormData({ 
@@ -346,7 +352,7 @@ const OrderListView = ({
       {showCreateForm && renderOrderForm(false)}
 
       {/* Edit Form */}
-      {editingOrder && renderOrderForm(true)}
+      {editingOrder && <div ref={editFormRef}>{renderOrderForm(true)}</div>}
 
       {/* Custom Orders List */}
       <div className="orders-list">

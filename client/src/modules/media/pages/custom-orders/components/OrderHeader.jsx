@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../../../../../shared/components/Button';
+import OrderCollectionLink from './OrderCollectionLink';
 import { getTotalItemsWithSubOrders, getUnwatchedItemsWithSubOrders } from '../utils/itemUtils';
 
 const OrderHeader = ({
@@ -8,6 +9,7 @@ const OrderHeader = ({
   onBackToOrderList,
   handleViewOrder,
   onGenerateAiPrompt,
+  onOrderUpdated,
   getAllNonReferenceItems,
   getUnwatchedNonReferenceItems,
   setShowMovieForm,
@@ -62,6 +64,8 @@ const OrderHeader = ({
           </span>
         </div>
       </div>
+
+      <OrderCollectionLink order={viewingOrderItems} onSaved={onOrderUpdated} />
 
       <div className="manage-items-actions">
         <Button

@@ -47,6 +47,7 @@ function createContentDiscoveryRoutes() {
       if (androidResponse?.data) {
         androidResponse.data.backgroundArtUrl = upNextData.backgroundArt ? `${baseUrl}/api/artwork${upNextData.backgroundArt}` : '';
         androidResponse.data.tvdbStatus = upNextData.tvdbStatus || null;
+        androidResponse.data.hasCreditScenes = upNextData.hasCreditScenes ?? null;
         androidResponse.data.collectionArtwork = (upNextData.collectionArtwork || []).map((collection) => ({
           title: collection.title,
           jellyfinId: collection.jellyfinId,

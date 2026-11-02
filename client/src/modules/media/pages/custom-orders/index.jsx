@@ -3915,6 +3915,10 @@ const handleSearchComics = async (e) => {
             onBackToOrderList={() => setViewingOrderItems(null)}
             handleViewOrder={handleViewOrder}
             onGenerateAiPrompt={handleGenerateAiPrompt}
+            onOrderUpdated={(updated) => {
+              setViewingOrderItems((prev) => (prev ? { ...prev, jellyfinCollectionId: updated.jellyfinCollectionId, jellyfinCollection: updated.jellyfinCollection } : prev));
+              fetchCustomOrders();
+            }}
             getAllNonReferenceItems={getAllNonReferenceItems}
             getUnwatchedNonReferenceItems={getUnwatchedNonReferenceItems}
             setShowMovieForm={setShowMovieForm}

@@ -6,6 +6,7 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const { getAndroidApiBaseUrl, createAndroidResponse, createAndroidErrorResponse } = require('./utilities/androidHelpers');
+const { getTrackDetails } = require('../../services/trackDetailsService');
 
 /**
  * Create gallery and playlist routes for Android app
@@ -21,6 +22,22 @@ function createGalleryPlaylistRoutes(prisma) {
     const thumb = metadata?.thumb || metadata?.parentThumb || metadata?.grandparentThumb;
     if (!thumb) return null;
     return thumb.startsWith('http') ? thumb : `${serverUrl(req)}/api/artwork/${thumb.replace(/^\//, '')}`;
+  };
+  // Composer/work/movement plus database album art (preferred over the Plex thumb, like the web app)
+  const trackDetailFields = async (req, ratingKey, fallbackArtworkUrl) => {
+    let details = null;
+    try {
+      details = await getTrackDetails(prisma, ratingKey);
+    } catch (error) {
+      console.warn(`📱 Could not load track details for ${ratingKey}:`, error.message);
+    }
+    return {
+      artworkUrl: details?.albumArtworkPath ? `${serverUrl(req)}${details.albumArtworkPath}` : fallbackArtworkUrl,
+      composer: details?.composer || null,
+      work: details?.work || null,
+      workCatalog: details?.workCatalog || null,
+      movement: details?.movement || null
+    };
   };
 
   // Android Gallery Endpoint - Get Random Gallery Image
@@ -230,7 +247,7 @@ function createGalleryPlaylistRoutes(prisma) {
                 duration: randomTrack.duration || 0,
                 type: randomTrack.type || 'track',
                 streamUrl: streamUrl,
-                artworkUrl: artworkUrl,
+                ...(await trackDetailFields(req, randomTrack.ratingKey, artworkUrl)),
                 plexUrl: plexUrl,
                 year: randomTrack.album?.year ? parseInt(randomTrack.album.year) : null,
                 index: randomTrack.index ? parseInt(randomTrack.index) : null,
@@ -501,7 +518,7 @@ function createGalleryPlaylistRoutes(prisma) {
             duration: randomTrack.duration || 0,
             type: randomTrack.type || 'track',
             streamUrl: streamUrl,
-            artworkUrl: artworkUrl,
+            ...(await trackDetailFields(req, randomTrack.ratingKey, artworkUrl)),
             plexUrl: plexUrl,
             year: randomTrack.album?.year ? parseInt(randomTrack.album.year) : null,
             index: randomTrack.index ? parseInt(randomTrack.index) : null,

@@ -19,14 +19,25 @@ function getAndroidApiBaseUrl() {
   return externalIp ? `http://${externalIp}:${PORT}` : `http://localhost:${PORT}`;
 }
 
+const YOUTUBE_ID = /^https?:\/\/(?:[a-z0-9-]+\.)*(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i;
+
+/** 16:9 YouTube thumbnail for a video URL, or null for non-YouTube URLs. */
+function getYouTubeThumbnailUrl(url) {
+  const match = typeof url === 'string' ? url.trim().match(YOUTUBE_ID) : null;
+  return match ? `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg` : null;
+}
+
 /**
  * Helper function to generate artwork URL for Android app
  * Matches exactly the getArtworkUrl function from web app
  */
 function getAndroidArtworkUrl(media, baseUrl) {
-  // Web videos don't have artwork
+  // Web videos use cached artwork when present, otherwise their YouTube thumbnail
   if (media?.type === 'webvideo') {
-    return null;
+    if (media.localArtworkPath) {
+      return `${baseUrl}/api/artwork/${String(media.localArtworkPath).split(/[\\/]/).pop()}`;
+    }
+    return getYouTubeThumbnailUrl(media.webUrl) || null;
   }
 
   // TV episodes always use the Jellyfin season artwork when available
@@ -119,6 +130,7 @@ function createAndroidErrorResponse(type, error, message) {
 module.exports = {
   getAndroidApiBaseUrl,
   getAndroidArtworkUrl,
+  getYouTubeThumbnailUrl,
   createAndroidResponse,
   createAndroidErrorResponse
 };

@@ -41,6 +41,7 @@ const stubs = {
   'tvdbCachedService.js': {},
   'utils/seasonArtwork.js': { applySeasonArtwork: async () => {}, applyBackgroundArtwork: async result => result },
   'services/tvdbEpisodeStatusService.js': { applyTvdbEpisodeStatus: async () => {} },
+  'services/movieCreditScenesService.js': { applyMovieCreditScenes: async () => {} },
   'utils/collectionArtwork.js': { applyCollectionArtwork: async () => {} }
 };
 for (const [name, exports] of Object.entries(stubs)) {

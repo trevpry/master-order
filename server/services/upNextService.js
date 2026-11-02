@@ -10,6 +10,7 @@ const { getNextCustomOrder } = require('../getNextCustomOrder');
 const HistoryPlusService = require('./historyPlusService');
 const { applySeasonArtwork, applyBackgroundArtwork } = require('../utils/seasonArtwork');
 const { applyTvdbEpisodeStatus } = require('./tvdbEpisodeStatusService');
+const { applyMovieCreditScenes } = require('./movieCreditScenesService');
 const { applyCollectionArtwork } = require('../utils/collectionArtwork');
 
 const historyPlusService = new HistoryPlusService();
@@ -82,6 +83,7 @@ async function resolveUpNext(req) {
   const result = await resolveUpNextContent(req);
   await applySeasonArtwork(result);
   await applyTvdbEpisodeStatus(result);
+  await applyMovieCreditScenes(result);
   await applyCollectionArtwork(result);
   return applyBackgroundArtwork(result);
 }
