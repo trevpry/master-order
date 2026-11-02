@@ -5,6 +5,7 @@ import OrderCard from './OrderCard';
 import PreviewLabel from './PreviewLabel';
 import HelpText from './HelpText';
 import FormSeparator from './FormSeparator';
+import JellyfinCollectionField from './JellyfinCollectionField';
 
 const OrderListView = ({
   showCreateForm,
@@ -46,7 +47,8 @@ const OrderListView = ({
       playlistRatingKey: '', 
       customPlaylistId: '',
       backgroundImageId: '',
-      backgroundGalleryId: ''
+      backgroundGalleryId: '',
+      jellyfinCollectionId: ''
     });
     setEditingOrder(null);
     setMessage('');
@@ -60,7 +62,7 @@ const OrderListView = ({
 
   const handleCancelEdit = () => {
     setEditingOrder(null);
-    setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '', backgroundImageId: '', backgroundGalleryId: '' });
+    setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '', backgroundImageId: '', backgroundGalleryId: '', jellyfinCollectionId: '' });
     setMessage('');
   };
 
@@ -277,6 +279,13 @@ const OrderListView = ({
           )}
         </div>
         
+        <JellyfinCollectionField
+          id={isEditing ? 'editJellyfinCollection' : 'jellyfinCollection'}
+          value={formData.jellyfinCollectionId}
+          onChange={(value) => setFormData({ ...formData, jellyfinCollectionId: value })}
+          currentCollection={isEditing ? editingOrder?.jellyfinCollection : null}
+        />
+
         <div className="form-actions">
           <Button type="submit" className="primary">
             {isEditing ? 'Update Order' : 'Create Order'}

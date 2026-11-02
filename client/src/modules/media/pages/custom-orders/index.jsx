@@ -33,6 +33,7 @@ import BookSearchResults from './components/BookSearchResults';
 import ComicSearchResults from './components/ComicSearchResults';
 import OrderCard from './components/OrderCard';
 import OrderListView from './components/OrderListView';
+import { NEW_COLLECTION } from './components/JellyfinCollectionField';
 import MovieFormModal from './components/modals/MovieFormModal';
 import BookFormModal from './components/modals/BookFormModal';
 import CmroBulkImportModal from './components/modals/CmroBulkImportModal';
@@ -192,7 +193,8 @@ function CustomOrders() {
     playlistRatingKey: '',
     customPlaylistId: '',
     backgroundImageId: '',
-    backgroundGalleryId: ''
+    backgroundGalleryId: '',
+    jellyfinCollectionId: ''
   });
   // Function to toggle expanded state for an item
   const toggleItemExpanded = (itemId) => {
@@ -424,6 +426,11 @@ function CustomOrders() {
       if (formData.backgroundGalleryId) {
         requestBody.backgroundGalleryId = parseInt(formData.backgroundGalleryId);
       }
+      if (formData.jellyfinCollectionId === NEW_COLLECTION) {
+        requestBody.createJellyfinCollection = true;
+      } else if (formData.jellyfinCollectionId) {
+        requestBody.jellyfinCollectionId = formData.jellyfinCollectionId;
+      }
 
       const response = await fetch(`${config.apiBaseUrl}/api/custom-orders`, {
         method: 'POST',
@@ -435,7 +442,7 @@ function CustomOrders() {
 
       if (response.ok) {
         setMessage('Custom order created successfully');
-        setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '' });
+        setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '', backgroundImageId: '', backgroundGalleryId: '', jellyfinCollectionId: '' });
         setSelectedParentId(null);
         setShowCreateForm(false);
         fetchCustomOrders(); // Refresh the list
@@ -506,7 +513,8 @@ function CustomOrders() {
       playlistRatingKey: order.playlistRatingKey || '',
       customPlaylistId: order.customPlaylistId ? order.customPlaylistId.toString() : '',
       backgroundImageId: order.backgroundImageId ? order.backgroundImageId.toString() : '',
-      backgroundGalleryId: order.backgroundGalleryId ? order.backgroundGalleryId.toString() : ''
+      backgroundGalleryId: order.backgroundGalleryId ? order.backgroundGalleryId.toString() : '',
+      jellyfinCollectionId: order.jellyfinCollectionId || ''
     });
     setMessage('');
     
@@ -549,6 +557,11 @@ function CustomOrders() {
       if (formData.backgroundGalleryId) {
         requestBody.backgroundGalleryId = parseInt(formData.backgroundGalleryId);
       }
+      if (formData.jellyfinCollectionId === NEW_COLLECTION) {
+        requestBody.createJellyfinCollection = true;
+      } else if ((formData.jellyfinCollectionId || null) !== (editingOrder.jellyfinCollectionId || null)) {
+        requestBody.jellyfinCollectionId = formData.jellyfinCollectionId || null;
+      }
 
       const response = await fetch(`${config.apiBaseUrl}/api/custom-orders/${editingOrder.id}`, {
         method: 'PUT',
@@ -560,7 +573,7 @@ function CustomOrders() {
 
       if (response.ok) {
         setMessage('Custom order updated successfully');
-        setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '' });
+        setFormData({ name: '', description: '', icon: '', playlistRatingKey: '', customPlaylistId: '', backgroundImageId: '', backgroundGalleryId: '', jellyfinCollectionId: '' });
         setEditingOrder(null);
         fetchCustomOrders(); // Refresh the list
         

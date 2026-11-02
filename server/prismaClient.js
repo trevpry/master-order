@@ -101,6 +101,37 @@ function createPrismaClient() {
     return next(params);
   });
 
+  // Keep linked Jellyfin collections in step with custom order contents.
+  const COLLECTION_FIELDS = ['plexKey', 'mediaType', 'customOrderId', 'referencedCustomOrderId', 'sourceProvider'];
+  prismaInstance.$use(async (params, next) => {
+    const result = await next(params);
+    try {
+      const orderIds = new Set();
+      const data = params.args?.data;
+      const touches = (d) => d && COLLECTION_FIELDS.some((field) => d[field] !== undefined);
+      if (params.model === 'CustomOrderItem') {
+        if (params.action === 'create' || (params.action === 'upsert') || (params.action === 'update' && touches(data))) {
+          orderIds.add(result?.customOrderId);
+        } else if (params.action === 'createMany') {
+          (Array.isArray(data) ? data : [data]).forEach((d) => orderIds.add(d?.customOrderId));
+        } else if (params.action === 'updateMany' && touches(data)) {
+          orderIds.add(data.customOrderId);
+          orderIds.add(params.args?.where?.customOrderId);
+        }
+      } else if (params.model === 'CustomOrder' && params.action === 'update' && data?.parentOrderId) {
+        orderIds.add(result?.id);
+      }
+      const ids = [...orderIds].filter((id) => Number.isInteger(id));
+      if (ids.length) {
+        const { scheduleOrderCollectionSync } = require('./services/customOrderCollectionService');
+        ids.forEach(scheduleOrderCollectionSync);
+      }
+    } catch (error) {
+      console.warn('[Prisma Middleware] Failed to schedule collection sync:', error.message);
+    }
+    return result;
+  });
+
   // Add graceful shutdown handler
   process.on('beforeExit', async () => {
     console.log('🔌 Prisma client disconnecting...');

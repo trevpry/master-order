@@ -611,85 +611,52 @@ async function markCustomOrderItemAsWatched(itemIdentifier) {
   }
 }
 
-// Get next unwatched episode for TV series
-async function getNextUnwatchedEpisode(selectedSeries) {
-  try {
-    console.log(`Getting episodes for ${selectedSeries.title} (${selectedSeries.ratingKey})`);
-    
-    // Use the database service to get the next unwatched episode
-    const nextEpisode = await plexDb.getNextUnwatchedEpisode(selectedSeries.ratingKey);
-    
-    if (nextEpisode) {
-      console.log(`Found next unwatched episode: Season ${nextEpisode.seasonNumber}, Episode ${nextEpisode.episodeNumber} - "${nextEpisode.title}"`);
-      return {
-        seasonNumber: nextEpisode.seasonNumber,
-        episodeNumber: nextEpisode.episodeNumber,
-        episodeTitle: nextEpisode.title,
-        seasonTitle: nextEpisode.seasonTitle,
-        ratingKey: nextEpisode.ratingKey,
-        totalEpisodesInSeason: nextEpisode.totalEpisodesInSeason
-      };
-    } else {
-      // If we get here, all episodes are watched
-      console.log(`All episodes of ${selectedSeries.title} appear to be watched`);
-      return null;
-    }
-    
-  } catch (error) {
-    console.error('Error getting next unwatched episode:', error);
-    return null;
-  }
-}
+// Custom orders select a specific episode, not the series' next unwatched episode.
+async function enhanceWithTVDBArtwork(selectedEpisode) {
+  const seasonNumber = selectedEpisode.seasonIndex ?? selectedEpisode.parentIndex;
+  const episodeNumber = selectedEpisode.index;
+  selectedEpisode.episodeRatingKey = selectedEpisode.ratingKey;
+  selectedEpisode.seasonNumber = seasonNumber;
+  selectedEpisode.episodeNumber = episodeNumber;
+  selectedEpisode.currentSeason = seasonNumber;
+  selectedEpisode.currentEpisode = episodeNumber;
+  selectedEpisode.episodeTitle = selectedEpisode.title;
+  selectedEpisode.nextEpisodeTitle = selectedEpisode.title;
+  selectedEpisode.seasonTitle = selectedEpisode.parentTitle;
+  selectedEpisode.totalEpisodesInSeason = selectedEpisode.season?.leafCount ?? null;
 
-// Enhance TV series with TVDB artwork and episode details
-async function enhanceWithTVDBArtwork(selectedSeries) {
   try {
-    console.log(`Enhancing ${selectedSeries.title} with TVDB artwork`);
-    
-    // Get the actual next unwatched episode from Plex
-    const nextEpisode = await getNextUnwatchedEpisode(selectedSeries);
-    
-    if (nextEpisode) {
-      console.log(`Found next unwatched episode: Season ${nextEpisode.seasonNumber}, Episode ${nextEpisode.episodeNumber} - "${nextEpisode.episodeTitle}"`);
-      selectedSeries.currentSeason = nextEpisode.seasonNumber;
-      selectedSeries.currentEpisode = nextEpisode.episodeNumber;
-      selectedSeries.nextEpisodeTitle = nextEpisode.episodeTitle;
-      selectedSeries.seasonTitle = nextEpisode.seasonTitle;
-      selectedSeries.totalEpisodesInSeason = nextEpisode.totalEpisodesInSeason;
-      
-      // Get TVDB artwork for the current season and episode details
-      const tvdbArtwork = await tvdbService.getCurrentSeasonArtwork(selectedSeries.title, nextEpisode.seasonNumber, nextEpisode.episodeNumber);
+    console.log(`Enhancing ${selectedEpisode.grandparentTitle} S${seasonNumber}E${episodeNumber} with TVDB artwork`);
+    if (seasonNumber != null && episodeNumber != null) {
+      const tvdbArtwork = await tvdbService.getCurrentSeasonArtwork(selectedEpisode.grandparentTitle, seasonNumber, episodeNumber);
       
       if (tvdbArtwork) {
         console.log(`TVDB artwork found: ${tvdbArtwork.url}`);
-        selectedSeries.tvdbArtwork = tvdbArtwork;
+        selectedEpisode.tvdbArtwork = tvdbArtwork;
         
         // Check for finale type in episode details
         if (tvdbArtwork.episodeDetails && tvdbArtwork.episodeDetails.finaleType) {
           console.log(`Episode finale type found: ${tvdbArtwork.episodeDetails.finaleType}`);
-          selectedSeries.finaleType = tvdbArtwork.episodeDetails.finaleType;
+          selectedEpisode.finaleType = tvdbArtwork.episodeDetails.finaleType;
         }
         
         // Check for final season status
         if (tvdbArtwork.isCurrentSeasonFinal && tvdbArtwork.seriesStatus === 'Ended') {
           console.log(`Current season is final season of ended series`);
-          selectedSeries.isCurrentSeasonFinal = true;
-          selectedSeries.seriesStatus = tvdbArtwork.seriesStatus;
+          selectedEpisode.isCurrentSeasonFinal = true;
+          selectedEpisode.seriesStatus = tvdbArtwork.seriesStatus;
         }
       } else {
-        console.log(`No TVDB artwork found for ${selectedSeries.title} season ${nextEpisode.seasonNumber}`);
+        console.log(`No TVDB artwork found for ${selectedEpisode.grandparentTitle} season ${seasonNumber}`);
       }
     } else {
-      console.log(`No unwatched episodes found for ${selectedSeries.title}, using fallback values`);
-      selectedSeries.currentSeason = null;
-      selectedSeries.currentEpisode = null;
-      selectedSeries.nextEpisodeTitle = null;
+      console.warn(`Missing episode numbering for custom order episode ${selectedEpisode.ratingKey}`);
     }
     
-    return selectedSeries;
+    return selectedEpisode;
   } catch (error) {
     console.error('Error enhancing with TVDB artwork:', error.message);
-    return selectedSeries; // Return original if TVDB fails
+    return selectedEpisode; // Preserve the selected episode if optional artwork fails.
   }
 }
 
@@ -887,26 +854,7 @@ async function getNextCustomOrder(req = null, mediaTypeLimiters = null) {
     if ((nextItem.mediaType === 'episode' || fullMediaDetails.type === 'episode') && fullMediaDetails.libraryProvider !== 'arr') {
       console.log(`Enhancing TV episode "${fullMediaDetails.title}" from series "${fullMediaDetails.grandparentTitle}" with TVDB data`);
       
-      // For TV episodes, we need to get the series information to enhance with TVDB
-      // The grandparentTitle contains the series name for episodes
-      const seriesForEnhancement = {
-        ...fullMediaDetails,
-        title: fullMediaDetails.grandparentTitle || fullMediaDetails.title,
-        ratingKey: fullMediaDetails.grandparentRatingKey || fullMediaDetails.ratingKey
-      };
-      
-      const enhancedDetails = await enhanceWithTVDBArtwork(seriesForEnhancement);
-      
-      // Copy the enhanced fields back to the episode details
-      fullMediaDetails.currentSeason = enhancedDetails.currentSeason;
-      fullMediaDetails.currentEpisode = enhancedDetails.currentEpisode;
-      fullMediaDetails.nextEpisodeTitle = enhancedDetails.nextEpisodeTitle;
-      fullMediaDetails.seasonTitle = enhancedDetails.seasonTitle;
-      fullMediaDetails.totalEpisodesInSeason = enhancedDetails.totalEpisodesInSeason;
-      fullMediaDetails.tvdbArtwork = enhancedDetails.tvdbArtwork;
-      fullMediaDetails.finaleType = enhancedDetails.finaleType;
-      fullMediaDetails.isCurrentSeasonFinal = enhancedDetails.isCurrentSeasonFinal;
-      fullMediaDetails.seriesStatus = enhancedDetails.seriesStatus;
+      await enhanceWithTVDBArtwork(fullMediaDetails);
         console.log(`Successfully selected enhanced TV episode: ${fullMediaDetails.title} from ${fullMediaDetails.grandparentTitle}`);
       return fullMediaDetails;
     } else {

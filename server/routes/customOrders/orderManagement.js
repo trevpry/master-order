@@ -4,6 +4,11 @@
  */
 
 const express = require('express');
+const {
+  attachLinkedCollections,
+  resolveCollectionLink,
+  syncLinkedCollectionsForOrder
+} = require('../../services/customOrderCollectionService');
 
 const isSubOrderArtworkDebugEnabled = process.env.DEBUG_SUBORDER_ARTWORK === '1';
 
@@ -362,6 +367,7 @@ function createOrderManagementRoutes(prisma, services) {
         }
       }
       
+      await attachLinkedCollections(customOrders, prisma).catch((error) => console.warn('Failed to attach linked collections:', error.message));
       res.json(customOrders);
     } catch (error) {
       console.error('Error fetching custom orders:', error);
@@ -372,7 +378,7 @@ function createOrderManagementRoutes(prisma, services) {
   // Create a new custom order
   router.post('/', async (req, res) => {
     try {
-      const { name, description, icon, parentOrderId, playlistRatingKey, customPlaylistId, backgroundGalleryId } = req.body;
+      const { name, description, icon, parentOrderId, playlistRatingKey, customPlaylistId, backgroundGalleryId, jellyfinCollectionId, createJellyfinCollection } = req.body;
       
       if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Custom order name is required' });
@@ -417,6 +423,15 @@ function createOrderManagementRoutes(prisma, services) {
         }
       }
       
+      let linkedCollectionId = null;
+      if (jellyfinCollectionId || createJellyfinCollection) {
+        try {
+          linkedCollectionId = await resolveCollectionLink({ jellyfinCollectionId, createJellyfinCollection, orderName: name.trim() }, { prisma });
+        } catch (error) {
+          return res.status(error.status || 502).json({ error: error.message || 'Failed to link Jellyfin collection' });
+        }
+      }
+
       const customOrder = await prisma.customOrder.create({
         data: {
           name: name.trim(),
@@ -425,7 +440,8 @@ function createOrderManagementRoutes(prisma, services) {
           parentOrderId: parentOrderId ? parseInt(parentOrderId) : null,
           playlistRatingKey: playlistRatingKey?.trim() || null,
           customPlaylistId: customPlaylistId ? parseInt(customPlaylistId) : null,
-          backgroundGalleryId: backgroundGalleryId ? parseInt(backgroundGalleryId) : null
+          backgroundGalleryId: backgroundGalleryId ? parseInt(backgroundGalleryId) : null,
+          jellyfinCollectionId: linkedCollectionId
         },
         include: {
           parentOrder: true,
@@ -441,6 +457,7 @@ function createOrderManagementRoutes(prisma, services) {
         await subOrderService.createSubOrderItems(customOrder.id, parseInt(parentOrderId));
       }
       
+      await attachLinkedCollections(customOrder, prisma);
       res.status(201).json(customOrder);
     } catch (error) {
       console.error('Error creating custom order:', error);
@@ -527,12 +544,14 @@ function createOrderManagementRoutes(prisma, services) {
         });
 
         await hydrateLibraryArtworkHintsForOrder(prisma, updatedOrder);
+        await attachLinkedCollections(updatedOrder, prisma);
 
         logOrderSubOrderThumbnailState(updatedOrder);
         
         res.json(updatedOrder);
       } else {
         await hydrateLibraryArtworkHintsForOrder(prisma, customOrder);
+        await attachLinkedCollections(customOrder, prisma);
         logOrderSubOrderThumbnailState(customOrder);
         res.json(customOrder);
       }
@@ -546,7 +565,7 @@ function createOrderManagementRoutes(prisma, services) {
   router.put('/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, description, isActive, icon, parentOrderId, playlistRatingKey, customPlaylistId, backgroundGalleryId } = req.body;
+      const { name, description, isActive, icon, parentOrderId, playlistRatingKey, customPlaylistId, backgroundGalleryId, jellyfinCollectionId, createJellyfinCollection } = req.body;
       
       // Get current order to check for parent changes
       const currentOrder = await prisma.customOrder.findUnique({
@@ -607,6 +626,17 @@ function createOrderManagementRoutes(prisma, services) {
       }
       
       const updateData = {};
+      if (jellyfinCollectionId !== undefined || createJellyfinCollection) {
+        try {
+          updateData.jellyfinCollectionId = await resolveCollectionLink({
+            jellyfinCollectionId,
+            createJellyfinCollection,
+            orderName: (name ?? currentOrder.name).trim()
+          }, { prisma });
+        } catch (error) {
+          return res.status(error.status || 502).json({ error: error.message || 'Failed to link Jellyfin collection' });
+        }
+      }
       if (name !== undefined) updateData.name = name.trim();
       if (description !== undefined) updateData.description = description?.trim() || null;
       if (isActive !== undefined) updateData.isActive = isActive;
@@ -705,7 +735,14 @@ function createOrderManagementRoutes(prisma, services) {
         // If parent didn't change but we have a parent, update the sub-order item
         await subOrderService.updateSubOrderItems(parseInt(id));
       }
-      
+
+      if (updateData.jellyfinCollectionId && updateData.jellyfinCollectionId !== currentOrder.jellyfinCollectionId) {
+        syncLinkedCollectionsForOrder(parseInt(id), { prisma }).catch((error) => {
+          console.warn(`⚠️ Jellyfin collection sync failed for custom order ${id}:`, error.message);
+        });
+      }
+
+      await attachLinkedCollections(customOrder, prisma);
       res.json(customOrder);
     } catch (error) {
       console.error('Error updating custom order:', error);

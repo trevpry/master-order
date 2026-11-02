@@ -225,6 +225,17 @@ class JellyfinService {
     return this.getAllItems({ ParentId: collectionId });
   }
 
+  async createCollection(name, ids = []) {
+    const params = { Name: name, IsLocked: false };
+    if (ids.length) params.Ids = ids.join(',');
+    return this.post('/Collections', {}, params);
+  }
+
+  async addToCollection(collectionId, ids) {
+    if (!ids || ids.length === 0) return;
+    await this.post(`/Collections/${collectionId}/Items`, {}, { Ids: ids.join(',') });
+  }
+
   async searchItems(searchTerm, types = ['Movie', 'Series', 'Episode'], limit = 25) {
     const userId = await this.getUserId();
     const result = await this.get('/Items', {

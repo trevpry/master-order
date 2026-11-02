@@ -87,6 +87,14 @@ const OrderCard = ({
             🔗 {order.listScrapeConfig.name || 'List Linked'} {order.listScrapeConfig.isActive ? '' : '(paused)'}
           </span>
         )}
+        {order.jellyfinCollection && (
+          <span
+            className="list-linked-badge"
+            title={order.jellyfinCollection.removed ? 'This collection was removed from Jellyfin' : 'Movies and series are added to this Jellyfin collection automatically'}
+          >
+            📚 {order.jellyfinCollection.name || 'Jellyfin collection'}{order.jellyfinCollection.removed ? ' (missing)' : ''}
+          </span>
+        )}
       </div>
 
       <div className="order-actions">

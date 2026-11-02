@@ -328,6 +328,7 @@ model CustomOrder {
   playlistRatingKey   String?
   customPlaylistId    Int?
   backgroundGalleryId Int?
+  jellyfinCollectionId String? // Jellyfin BoxSet id; order movies/series are added to it automatically
   backgroundGallery   BackgroundGallery? @relation(fields: [backgroundGalleryId], references: [id])
   customPlaylist      CustomPlaylist?    @relation(fields: [customPlaylistId], references: [id])
   plexPlaylist        PlexPlaylist?      @relation(fields: [playlistRatingKey], references: [ratingKey])

@@ -158,8 +158,9 @@ function formatAndroidCustomOrderResponse(upNextData, baseUrl) {
     }),
     // Episode-specific fields for custom orders
     ...(upNextData.type === 'episode' && {
-      seasonNumber: upNextData.seasonNumber || upNextData.currentSeason || null,
-      episodeNumber: upNextData.episodeNumber || upNextData.currentEpisode || null,
+      episodeRatingKey: episodeRatingKey || null,
+      seasonNumber: upNextData.seasonNumber ?? upNextData.currentSeason ?? null,
+      episodeNumber: upNextData.episodeNumber ?? upNextData.currentEpisode ?? null,
       episodeTitle: upNextData.episodeTitle || upNextData.nextEpisodeTitle || null,
       seriesTitle: upNextData.seriesTitle || upNextData.grandparentTitle || null
     }),

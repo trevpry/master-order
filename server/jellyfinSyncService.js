@@ -1006,6 +1006,9 @@ class JellyfinSyncService {
         }
       }).catch(err => console.warn('Failed to persist Jellyfin sync run log:', err.message));
 
+      require('./services/customOrderCollectionService').syncAllOrderCollections()
+        .catch(err => console.warn('Custom order collection sync failed:', err.message));
+
       this.lastResult = result;
       return result;
     } catch (error) {

@@ -68,27 +68,49 @@ async function getCollectionsForItem(itemKey, prisma, { exclude = [] } = {}) {
   return result;
 }
 
-/**
- * Attach the movie's or episode series' Jellyfin collections (plus parent
- * collections), excluding the Up Next settings collection.
- */
-async function applyCollectionArtwork(media, prisma = require('../prismaClient')) {
-  if (!media || media.libraryProvider === 'arr') return media;
+async function getItemCollectionArtwork(media, prisma) {
+  if (media.libraryProvider === 'arr') return null;
   const isEpisode = media.type === 'episode' || media.customOrderMediaType === 'episode';
   const isMovie = media.type === 'movie' || media.customOrderMediaType === 'movie' || media.orderType === 'MOVIES_GENERAL';
-  if (!isEpisode && !isMovie) return media;
+  if (!isEpisode && !isMovie) return null;
+  const itemKey = isEpisode
+    ? await resolveEpisodeSeriesKey(media, prisma)
+    : [media.plexKey, media.ratingKey].find(key => key && JELLYFIN_ID.test(String(key)));
+  if (!itemKey) return null;
+  const settings = await prisma.settings.findUnique({ where: { id: 1 }, select: { collectionName: true } });
+  return getCollectionsForItem(itemKey, prisma, { exclude: [settings?.collectionName] });
+}
+
+/**
+ * Attach collection artwork: first the Jellyfin collections linked to the item's custom
+ * order (and its containing orders) for any item type, then the movie's or episode
+ * series' own collections (plus parent collections), excluding the Up Next settings collection.
+ */
+async function applyCollectionArtwork(media, prisma = require('../prismaClient')) {
+  if (!media) return media;
+  const artwork = [];
+  let resolved = false;
+  if (media.customOrderId != null) {
+    try {
+      // Lazy: the service imports this module.
+      const { getLinkedCollectionArtwork } = require('../services/customOrderCollectionService');
+      artwork.push(...await getLinkedCollectionArtwork(media.customOrderId, prisma));
+    } catch (error) {
+      console.warn('Failed to resolve custom order collection artwork:', error.message);
+    }
+  }
   try {
-    const itemKey = isEpisode
-      ? await resolveEpisodeSeriesKey(media, prisma)
-      : [media.plexKey, media.ratingKey].find(key => key && JELLYFIN_ID.test(String(key)));
-    if (!itemKey) return media;
-    const settings = await prisma.settings.findUnique({ where: { id: 1 }, select: { collectionName: true } });
-    media.collectionArtwork = await getCollectionsForItem(itemKey, prisma, {
-      exclude: [settings?.collectionName]
-    });
+    const itemArtwork = await getItemCollectionArtwork(media, prisma);
+    if (itemArtwork) {
+      resolved = true;
+      artwork.push(...itemArtwork);
+    }
   } catch (error) {
     console.warn('Failed to resolve collection artwork:', error.message);
   }
+  const seen = new Set();
+  const unique = artwork.filter(entry => !seen.has(entry.jellyfinId) && seen.add(entry.jellyfinId));
+  if (resolved || unique.length) media.collectionArtwork = unique;
   return media;
 }
 
