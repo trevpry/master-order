@@ -21,7 +21,14 @@
  */
 
 const fs = require('fs');
-const fluentFfmpeg = require('fluent-ffmpeg');
+
+// fluent-ffmpeg is optional; callers that only need the binary paths (e.g. scene splitting) work without it
+let fluentFfmpeg = null;
+try {
+  fluentFfmpeg = require('fluent-ffmpeg');
+} catch (_error) {
+  fluentFfmpeg = null;
+}
 
 const SYSTEM_FFMPEG_CANDIDATES = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
 const SYSTEM_FFPROBE_CANDIDATES = ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe'];
@@ -76,10 +83,10 @@ function resolveFfprobePath() {
 const ffmpegPath = resolveFfmpegPath();
 const ffprobePath = resolveFfprobePath();
 
-if (ffmpegPath) {
+if (fluentFfmpeg && ffmpegPath) {
   fluentFfmpeg.setFfmpegPath(ffmpegPath);
 }
-if (ffprobePath) {
+if (fluentFfmpeg && ffprobePath) {
   fluentFfmpeg.setFfprobePath(ffprobePath);
 }
 

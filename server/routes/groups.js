@@ -2,8 +2,24 @@ const express = require('express');
 const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const { sendSuccess, sendBadRequest, sendNotFound, sendServerError, asyncHandler } = require('../utils/responses');
+const {
+  refreshGroupPerformers,
+  refreshGroupPerformersInBackground
+} = require('../services/stashGroupPerformerService');
 
 const prisma = new PrismaClient();
+
+// Backfill scene-derived group performers shortly after startup (covers groups synced before this feature)
+setTimeout(() => {
+  refreshGroupPerformers(prisma)
+    .then(r => (r.created || r.removed) && console.log(`👥 [Group Performers] Startup refresh: +${r.created} / -${r.removed}`))
+    .catch(err => console.warn('⚠️ [Group Performers] Startup refresh failed:', err.message));
+}, 30000).unref();
+
+const groupPerformersInclude = {
+  include: { performer: { select: { id: true, name: true, image: true, gender: true } } },
+  orderBy: { performer: { name: 'asc' } }
+};
 
 /**
  * STASH GROUPS (MOVIES) ROUTES
@@ -21,7 +37,8 @@ router.get('/', asyncHandler(async (req, res) => {
     sortBy = 'name',
     sortOrder = 'asc',
     search = '',
-    studioId = null
+    studioId = null,
+    performerId = null
   } = req.query;
 
   const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -45,6 +62,19 @@ router.get('/', asyncHandler(async (req, res) => {
 
   if (studioId) {
     where.studioId = studioId;
+  }
+
+  if (performerId) {
+    // Make sure links reflect the performer's current scenes before filtering
+    const [sceneGroups, linkedGroups] = await Promise.all([
+      prisma.stashGroupScene.findMany({
+        where: { scene: { performers: { some: { performerId } } } },
+        select: { groupId: true }
+      }),
+      prisma.stashGroupPerformer.findMany({ where: { performerId }, select: { groupId: true } })
+    ]);
+    await refreshGroupPerformers(prisma, [...new Set([...sceneGroups, ...linkedGroups].map(g => g.groupId))]);
+    where.performers = { some: { performerId } };
   }
 
   // Get total count for pagination
@@ -77,7 +107,11 @@ router.get('/', asyncHandler(async (req, res) => {
         include: {
           tag: true
         }
-      }
+      },
+      _count: { select: { performers: true } },
+      ...(performerId ? {
+        performers: { where: { performerId }, select: { source: true } }
+      } : {})
     }
   });
 
@@ -96,10 +130,17 @@ router.get('/', asyncHandler(async (req, res) => {
 router.get('/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
 
+  try {
+    await refreshGroupPerformers(prisma, [id]);
+  } catch (error) {
+    console.warn('⚠️ [Group Performers] Refresh failed:', error.message);
+  }
+
   const group = await prisma.stashGroup.findUnique({
     where: { id },
     include: {
       studio: true,
+      performers: groupPerformersInclude,
       scenes: {
         include: {
           scene: {
@@ -261,6 +302,7 @@ router.post('/:id/scenes', asyncHandler(async (req, res) => {
     }
   });
 
+  refreshGroupPerformersInBackground(prisma, [id]);
   sendSuccess(res, groupScene);
 }));
 
@@ -277,6 +319,7 @@ router.delete('/:id/scenes/:sceneId', asyncHandler(async (req, res) => {
     }
   });
 
+  refreshGroupPerformersInBackground(prisma, [id]);
   sendSuccess(res, { message: 'Scene removed from group' });
 }));
 

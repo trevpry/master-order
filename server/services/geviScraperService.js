@@ -1089,6 +1089,48 @@ class GeviScraperService {
     
     console.log(`\n🎯 PASS 1 Complete: ${matches.length} scenes matched by performers, ${unmatchedDbScenes.length} remaining`);
 
+    // PASS 1b: Match by scene length when the scraper provides per-scene durations (e.g. AEBN)
+    const durationCandidates = unmatchedDbScenes.filter(s => s.duration > 0);
+    if (durationCandidates.length > 0 && movieScenes.some(ms => ms.durationSeconds > 0)) {
+      console.log(`\n🎯 PASS 1b: Matching ${durationCandidates.length} scenes by length...`);
+      for (const dbScene of durationCandidates) {
+        const tolerance = Math.max(10, dbScene.duration * 0.03);
+        const candidates = movieScenes
+          .filter(ms => ms.durationSeconds > 0 && !matchedMovieSceneNumbers.has(ms.sceneNumber))
+          .map(ms => ({ ms, diff: Math.abs(ms.durationSeconds - dbScene.duration) }))
+          .filter(c => c.diff <= tolerance)
+          .sort((a, b) => a.diff - b.diff);
+        if (candidates.length === 0) continue;
+
+        const sceneIndex = dbScene.groups?.[0]?.sceneIndex;
+        const positional = candidates.find(c => c.ms.sceneNumber === sceneIndex);
+        // Ambiguous when several scenes have near-identical lengths; let position break the tie
+        const ambiguous = candidates.length > 1 && candidates[1].diff - candidates[0].diff < 3;
+        const best = positional || (ambiguous ? null : candidates[0]);
+        if (!best) continue;
+
+        const bestMatch = best.ms;
+        const confidence = bestMatch.sceneNumber === sceneIndex ? 90 : 75;
+        matches.push({
+          sceneId: dbScene.id,
+          dbSceneTitle: dbScene.title || null,
+          dbSceneDuration: dbScene.duration,
+          sceneNumber: bestMatch.sceneNumber,
+          title: bestMatch.title || null,
+          date: bestMatch.date,
+          details: bestMatch.details,
+          episodeUrl: bestMatch.episodeUrl,
+          performers: bestMatch.performers,
+          tags: bestMatch.tags || [],
+          confidence,
+          matchMethod: 'duration'
+        });
+        matchedMovieSceneNumbers.add(bestMatch.sceneNumber);
+        unmatchedDbScenes.splice(unmatchedDbScenes.indexOf(dbScene), 1);
+        console.log(`   ✅ PASS 1b: Matched scene "${dbScene.title || dbScene.id}" to Scene ${bestMatch.sceneNumber} (length diff ${best.diff.toFixed(1)}s)`);
+      }
+    }
+
     // PASS 2: Match remaining scenes by position (scene number)
     if (unmatchedDbScenes.length > 0) {
       console.log(`\n🎯 PASS 2: Matching remaining scenes by position...`);

@@ -2,6 +2,212 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
 
+const cleanText = (text) => (text || '').replace(/\s+/g, ' ').trim();
+
+const absoluteUrl = (src) => {
+  if (!src) return null;
+  if (src.startsWith('//')) return `https:${src}`;
+  if (src.startsWith('/')) return `https://gay.aebn.com${src}`;
+  return src;
+};
+
+// "16:13" / "01:29:57" -> seconds
+function parseClockToSeconds(text) {
+  const match = (text || '').match(/(\d{1,3}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return null;
+  const parts = [match[1], match[2], match[3]].filter(p => p !== undefined).map(Number);
+  return parts.reduce((total, part) => total * 60 + part, 0);
+}
+
+const formatSeconds = (seconds) => {
+  if (seconds == null) return null;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+};
+
+// AEBN scene metadata looks like "16:13 (SD-480p)"
+function parseAebnDuration(text) {
+  const raw = cleanText(text);
+  const durationSeconds = parseClockToSeconds(raw);
+  const qualityMatch = raw.match(/\(([^)]+)\)/);
+  return {
+    duration: formatSeconds(durationSeconds),
+    durationSeconds,
+    quality: qualityMatch ? qualityMatch[1].trim() : null
+  };
+}
+
+const listFromLinks = ($, $container) => {
+  const names = [];
+  $container.find('a').each((i, a) => {
+    const name = cleanText($(a).text()).replace(/,\s*$/, '');
+    if (name && !names.includes(name)) names.push(name);
+  });
+  return names;
+};
+
+/**
+ * Parse an AEBN movie page (after the age gate) into movie metadata and its scene list.
+ */
+function parseAebnMoviePage(html) {
+  const $ = cheerio.load(html);
+
+  // Detail list items are "Label: value" (Studio, Released, Director, Quality, Running Time, Stars, ...)
+  const detailItems = {};
+  $('.dts-section-page-detail-info li, ul.section-detail-list li').each((i, li) => {
+    const $li = $(li);
+    const label = cleanText($li.find('.section-detail-list-item-title').first().text() || $li.text().split(':')[0])
+      .replace(/:$/, '')
+      .toLowerCase();
+    if (label && !detailItems[label]) detailItems[label] = $li;
+  });
+  const detailValue = (...labels) => {
+    for (const label of labels) {
+      const $li = detailItems[label];
+      if ($li) {
+        const text = cleanText($li.text());
+        const value = text.includes(':') ? text.slice(text.indexOf(':') + 1).trim() : text;
+        if (value) return value;
+      }
+    }
+    return '';
+  };
+
+  const movieTitle = cleanText($('.dts-section-page-heading-title h1').first().text()) ||
+                     cleanText($('h1.dts-movie-title').first().text()) ||
+                     cleanText($('title').text().split('|')[0]);
+
+  const studioName = cleanText($('.dts-studio-name a').first().text()) ||
+                     (detailItems.studio ? cleanText(detailItems.studio.find('a').first().text()) : '') ||
+                     detailValue('studio') ||
+                     cleanText($('a[href*="/gay/studios/"]').first().text());
+
+  const releaseDate = normalizeDate(
+    cleanText($('.dts-release-date').text()).replace(/Released?:?\s*/i, '') ||
+    detailValue('released', 'release date')
+  );
+
+  const director = cleanText($('.dts-director-name a').first().text()) ||
+                   (detailItems.director ? listFromLinks($, detailItems.director).join(', ') : '') ||
+                   detailValue('director', 'directors');
+
+  const synopsis = cleanText($('.dts-section-page-detail-description-body').first().text()) ||
+                   cleanText($('.dts-movie-description').text());
+
+  const boxCover = $('.dts-section-page-detail-main-image-wrapper img').first().attr('src') ||
+                   $('img.dts-movie-boxcover').attr('src') ||
+                   $('img[src*="/BoxCovers/"]').first().attr('src') ||
+                   $('meta[property="og:image"]').attr('content');
+  // Drop the "?s=293w" resize hint to get the full-size cover
+  const fixedMovieImage = absoluteUrl(boxCover ? boxCover.replace(/\?s=\d+[wh]$/, '') : null);
+  const backCover = $('img.dts-modal-boxcover-back').first().attr('src');
+  const backImage = absoluteUrl(backCover ? backCover.replace(/\?s=\d+[wh]$/, '') : null);
+
+  const runningTimeSeconds = parseClockToSeconds(detailValue('running time', 'runtime', 'length'));
+  const quality = detailValue('quality') || null;
+  const moviePerformers = detailItems.stars ? listFromLinks($, detailItems.stars) : [];
+
+  // Each scene is in a <section> tag with id="scene-XXXXX"
+  const scenes = [];
+  $('section[id^="scene-"]').each((i, elem) => {
+    const $scene = $(elem);
+    const sceneId = $scene.attr('id');
+
+    const sceneTitle = cleanText($scene.find('.dts-panel-header-title-no-link').first().text()) ||
+                       cleanText($scene.find('.dts-panel-header-title h1 span').first().text()) ||
+                       cleanText($scene.find('h1').first().text()).replace(/\s+\d{1,3}:\d{2}.*$/, '');
+
+    const sceneNumberMatch = sceneTitle.match(/Scene\s+(\d+)/i);
+    const sceneNumber = sceneNumberMatch ? parseInt(sceneNumberMatch[1], 10) : i + 1;
+
+    const timing = parseAebnDuration(
+      $scene.find('.dts-scene-title-metadata span').first().text() ||
+      $scene.find('.dts-scene-title-metadata').first().text()
+    );
+
+    // Format 1 (older): <span class="dts-scene-star-wrapper"> <a href="/gay/stars/...">Name</a>
+    // Format 2 (newer): <a class="dts-movie-star-wrapper dts-text-link" href="/gay/stars/..."><span>Name</span></a>
+    const scenePerformersList = [];
+    const addPerformer = (name) => {
+      const clean = cleanText(name);
+      if (clean && !scenePerformersList.includes(clean)) scenePerformersList.push(clean);
+    };
+    $scene.find('a.dts-movie-star-wrapper.dts-text-link span').each((j, el) => addPerformer($(el).text()));
+    if (scenePerformersList.length === 0) {
+      $scene.find('.dts-scene-star-wrapper a.dts-text-link').each((j, el) => addPerformer($(el).text()));
+    }
+
+    // Prefer the 5th thumbnail for a better scene representation
+    const thumbnails = $scene.find('img[src*="/dis/t/"]');
+    const sceneImage = absoluteUrl(
+      thumbnails.length >= 5 ? thumbnails.eq(4).attr('src') : thumbnails.first().attr('src')
+    ) || fixedMovieImage;
+
+    const sexActs = [];
+    const positions = [];
+    const settings = [];
+    const collectTags = ($el, linkSelector) => {
+      const label = $el.find('.section-detail-list-item-title').text().trim();
+      const target = label.includes('Sex acts:') ? sexActs
+        : label.includes('Positions:') ? positions
+          : label.includes('Settings:') ? settings
+            : null;
+      if (!target) return;
+      $el.find(linkSelector).each((k, a) => {
+        const tag = cleanText($(a).text()).replace(/,\s*$/, '');
+        if (tag && !target.includes(tag)) target.push(tag);
+      });
+    };
+    // Format 1: tags in <li> elements (older); Format 2: .scene-strip-meta-data divs (newer)
+    $scene.find('li').each((j, li) => collectTags($(li), 'a'));
+    $scene.find('.scene-strip-meta-data > div').each((j, div) => collectTags($(div), 'a.dts-text-link'));
+
+    scenes.push({
+      id: sceneId,
+      title: sceneTitle,
+      number: sceneNumber,
+      duration: timing.duration,
+      durationSeconds: timing.durationSeconds,
+      quality: timing.quality,
+      performers: scenePerformersList,
+      image: sceneImage,
+      sexActs,
+      positions,
+      settings
+    });
+  });
+
+  return {
+    movieTitle,
+    studioName,
+    releaseDate,
+    director,
+    synopsis,
+    fixedMovieImage,
+    backImage,
+    runningTimeSeconds,
+    quality,
+    moviePerformers,
+    scenes
+  };
+}
+
+// AEBN shows dates like "Jan 05, 2021" or "01/05/2021"; Stash wants YYYY-MM-DD
+function normalizeDate(text) {
+  const value = cleanText(text);
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  if (!isNaN(parsed.getTime())) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+  }
+  return value;
+}
+
 class AebnScraper {
   constructor() {
     this.siteName = 'AEBN';
@@ -97,155 +303,25 @@ class AebnScraper {
       browser = null;
 
       console.log(`   - Page content loaded, parsing HTML...`);
-      const $ = cheerio.load(html);
-
-      // Extract movie-level data
-      const movieTitle = $('.dts-section-page-heading-title h1').first().text().trim() ||
-                         $('h1.dts-movie-title').first().text().trim() ||
-                         $('title').text().split('|')[0].trim();
-      
-      const studioName = $('.dts-studio-name a').first().text().trim() ||
-                         $('a[href*="/gay/studios/"]').first().text().trim();
-      
-      const releaseDate = $('.dts-release-date').text().replace(/Released?:?\s*/i, '').trim();
-      
-      const director = $('.dts-director-name a').first().text().trim();
-
-      const synopsis = $('.dts-movie-description').text().trim();
-
-      const movieImage = $('img.dts-movie-boxcover').attr('src') ||
-                        $('meta[property="og:image"]').attr('content');
-      
-      // Fix protocol-relative URLs (//pic.aebn.net/...) by adding https:
-      const fixedMovieImage = movieImage && movieImage.startsWith('//') ? `https:${movieImage}` : movieImage;
+      const {
+        movieTitle,
+        studioName,
+        releaseDate,
+        director,
+        synopsis,
+        fixedMovieImage,
+        backImage,
+        runningTimeSeconds,
+        quality,
+        moviePerformers,
+        scenes
+      } = parseAebnMoviePage(html);
 
       console.log(`   - Movie: ${movieTitle}`);
       console.log(`   - Studio: ${studioName}`);
-
-      // Extract ALL scenes from the page
-      // Each scene is in a <section> tag with id="scene-XXXXX"
-      const scenes = [];
-      
-      $('section[id^="scene-"]').each((i, elem) => {
-        const $scene = $(elem);
-        const sceneId = $scene.attr('id'); // e.g., "scene-977220"
-        
-        // Get scene title from header (e.g., "Scene 1", "Scene 2")
-        // First try the specific no-link span for more accurate scene number
-        const sceneTitle = $scene.find('.dts-panel-header-title-no-link').first().text().trim() ||
-                          $scene.find('.dts-panel-header-title h1 span').first().text().trim() || 
-                          $scene.find('h1').first().text().trim();
-        
-        // Extract just the scene number from "Scene 1" -> 1
-        const sceneNumberMatch = sceneTitle.match(/Scene\s+(\d+)/i);
-        const sceneNumber = sceneNumberMatch ? parseInt(sceneNumberMatch[1]) : null;
-        
-        // Get scene duration metadata if available
-        const sceneDuration = $scene.find('.dts-scene-title-metadata span').text().trim();
-        
-        // Extract performers from this specific scene
-        // Format 1 (older): <span class="dts-scene-star-wrapper"> <a href="/gay/stars/...">Name</a>
-        // Format 2 (newer): <a class="dts-movie-star-wrapper dts-text-link" href="/gay/stars/..."><span>Name</span></a>
-        const scenePerformersList = [];
-        
-        // Try newer format first: a.dts-movie-star-wrapper > span
-        $scene.find('a.dts-movie-star-wrapper.dts-text-link span').each((j, perfElem) => {
-          const perfName = $(perfElem).text().trim();
-          if (perfName && !scenePerformersList.includes(perfName)) {
-            scenePerformersList.push(perfName);
-          }
-        });
-        
-        // If no performers found, try older format: .dts-scene-star-wrapper a
-        if (scenePerformersList.length === 0) {
-          $scene.find('.dts-scene-star-wrapper a.dts-text-link').each((j, perfElem) => {
-            const perfName = $(perfElem).text().trim();
-            if (perfName && !scenePerformersList.includes(perfName)) {
-              scenePerformersList.push(perfName);
-            }
-          });
-        }
-        
-        // Get scene image (5th thumbnail for better scene representation)
-        const thumbnails = $scene.find('img[src*="/dis/t/"]');
-        let sceneImage = thumbnails.length >= 5 ? 
-                          thumbnails.eq(4).attr('src') : // Use 5th thumbnail (index 4)
-                          (thumbnails.first().attr('src') || fixedMovieImage); // Fallback to first or movie image
-        
-        // Fix protocol-relative URLs (//pic.aebn.net/...) by adding https:
-        if (sceneImage && sceneImage.startsWith('//')) {
-          sceneImage = `https:${sceneImage}`;
-        }
-        
-        // Get sex acts, positions, settings
-        const sexActs = [];
-        const positions = [];
-        const settings = [];
-        
-        // Format 1: Tags in <li> elements (older format)
-        $scene.find('li').each((j, li) => {
-          const $li = $(li);
-          const label = $li.find('.section-detail-list-item-title').text().trim();
-          
-          if (label.includes('Sex acts:')) {
-            $li.find('a').each((k, a) => {
-              const act = $(a).text().trim().replace(/,\s*$/, '');
-              if (act) sexActs.push(act);
-            });
-          } else if (label.includes('Positions:')) {
-            $li.find('a').each((k, a) => {
-              const pos = $(a).text().trim().replace(/,\s*$/, '');
-              if (pos) positions.push(pos);
-            });
-          } else if (label.includes('Settings:')) {
-            $li.find('a').each((k, a) => {
-              const setting = $(a).text().trim().replace(/,\s*$/, '');
-              if (setting) settings.push(setting);
-            });
-          }
-        });
-        
-        // Format 2: Tags in .scene-strip-meta-data div (newer format)
-        $scene.find('.scene-strip-meta-data > div').each((j, div) => {
-          const $div = $(div);
-          const label = $div.find('.section-detail-list-item-title').text().trim();
-          
-          if (label.includes('Sex acts:')) {
-            $div.find('a.dts-text-link').each((k, a) => {
-              const act = $(a).text().trim();
-              if (act && !sexActs.includes(act)) sexActs.push(act);
-            });
-          } else if (label.includes('Positions:')) {
-            $div.find('a.dts-text-link').each((k, a) => {
-              const pos = $(a).text().trim();
-              if (pos && !positions.includes(pos)) positions.push(pos);
-            });
-          } else if (label.includes('Settings:')) {
-            $div.find('a.dts-text-link').each((k, a) => {
-              const setting = $(a).text().trim();
-              if (setting && !settings.includes(setting)) settings.push(setting);
-            });
-          }
-        });
-
-        // Add scene even if no performers (some AEBN scenes don't list performers)
-        scenes.push({
-          id: sceneId,
-          title: sceneTitle,
-          number: sceneNumber,
-          duration: sceneDuration,
-          performers: scenePerformersList,
-          image: sceneImage,
-          sexActs: sexActs,
-          positions: positions,
-          settings: settings
-        });
-        
-        if (scenePerformersList.length > 0) {
-          console.log(`   - Found scene: ${sceneTitle} (number: ${sceneNumber}) with performers: ${scenePerformersList.join(', ')}`);
-        } else {
-          console.log(`   - Found scene: ${sceneTitle} (number: ${sceneNumber}) - no performers listed`);
-        }
+      scenes.forEach(scene => {
+        const perfs = scene.performers.length > 0 ? `performers: ${scene.performers.join(', ')}` : 'no performers listed';
+        console.log(`   - Found scene: ${scene.title} (number: ${scene.number}, length: ${scene.duration || '?'}) - ${perfs}`);
       });
 
       console.log(`   - Extracted ${scenes.length} scenes from movie page`);
@@ -298,7 +374,10 @@ class AebnScraper {
             allPerformersSet.add(performer);
           });
         });
+        moviePerformers.forEach(performer => allPerformersSet.add(performer));
         const allPerformers = Array.from(allPerformersSet);
+        const sceneSeconds = scenes.reduce((total, scene) => total + (scene.durationSeconds || 0), 0);
+        const totalSeconds = runningTimeSeconds || sceneSeconds || null;
         
         console.log(`   - Collected ${allPerformers.length} unique performers from ${scenes.length} scenes`);
         
@@ -314,6 +393,8 @@ class AebnScraper {
             sceneNumber: scene.number,
             title: scene.title,
             duration: scene.duration,
+            durationSeconds: scene.durationSeconds,
+            quality: scene.quality,
             performers: scene.performers.map(name => ({ name })),
             tags: allTags.map(tag => ({ name: tag })),
             image: scene.image,
@@ -335,6 +416,15 @@ class AebnScraper {
           director: director || null,
           studio: studioName || null,
           image: fixedMovieImage || null,
+          // Group (movie) field names used by the group scrape review
+          name: movieTitle || null,
+          synopsis: synopsis || null,
+          front_image: fixedMovieImage || null,
+          back_image: backImage || null,
+          duration: totalSeconds,
+          quality: quality,
+          sceneCount: scenes.length,
+          externalUrls: [url],
           performers: allPerformers.map(name => ({ name })), // All performers from all scenes
           tags: [], // No movie-level tags
           movies: movieTitle ? [{
@@ -445,3 +535,6 @@ class AebnScraper {
 }
 
 module.exports = AebnScraper;
+module.exports.parseAebnMoviePage = parseAebnMoviePage;
+module.exports.parseAebnDuration = parseAebnDuration;
+module.exports.parseClockToSeconds = parseClockToSeconds;

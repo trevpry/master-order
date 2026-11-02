@@ -4,6 +4,16 @@ if (process.env.NODE_ENV !== 'production') {
 }
 const fetch = require('node-fetch');
 const prisma = require('./prismaClient'); // Use shared Prisma client
+const { reconcileAllGroupPerformers } = require('./services/stashGroupPerformerService');
+
+// Auto-attach scene performers to their groups (and restore manual ones from Stash); never fails the sync.
+async function reconcileGroupPerformersAfterSync(graphql) {
+  try {
+    await reconcileAllGroupPerformers(prisma, graphql);
+  } catch (error) {
+    console.warn('⚠️ Group performer reconcile failed:', error.message);
+  }
+}
 const PerformerTagMappingService = require('./services/performerTagMappingService');
 
 class StashSyncServiceOptimized {
@@ -1416,6 +1426,8 @@ class StashSyncServiceOptimized {
       console.log('🧹 Starting OPTIMIZED comprehensive cleanup of orphaned entities...');
       const cleanupResults = await this.cleanupOrphanedEntitiesOptimized(true);
       console.log(`✅ OPTIMIZED comprehensive cleanup completed:`, cleanupResults);
+
+      await reconcileGroupPerformersAfterSync((q, v) => this.makeGraphQLRequest(q, v));
 
       const totalTime = Date.now() - startTime;
       const improvement = this.calculatePerformanceImprovement(totalTime);

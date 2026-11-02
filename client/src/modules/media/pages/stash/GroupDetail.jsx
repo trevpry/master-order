@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import Button from '../../../../shared/components/Button';
 import SceneGrid from './components/SceneGrid';
+import EditGroupModal from './components/EditGroupModal';
+import GroupPerformers from './components/GroupPerformers';
+import SplitSceneModal from './components/SplitSceneModal';
 import config from '../../../../config';
 
 export default function GroupDetail() {
@@ -11,6 +14,8 @@ export default function GroupDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showScrapeModal, setShowScrapeModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [splitScene, setSplitScene] = useState(null);
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [isScraping, setIsScraping] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -76,8 +81,8 @@ export default function GroupDetail() {
     }
   };
 
-  const fetchGroup = async () => {
-    setLoading(true);
+  const fetchGroup = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     
     try {
@@ -185,7 +190,7 @@ export default function GroupDetail() {
         
         // Handle both GEVI (movie) and generic scraper (scraped) response formats
         const movieData = result.data.movie || result.data.scraped;
-        const { sourceUrl, matchedScenes, compilations } = result.data;
+        const { sourceUrl, matchedScenes, compilations, sceneList } = result.data;
         
         console.log('🎬 Scraped movie data:', movieData);
         console.log('🎬 Source URL:', sourceUrl);
@@ -222,6 +227,7 @@ export default function GroupDetail() {
             originalBackImage: originalBackImage // For sending to Stash
           },
           matchedScenes: matchedScenes || [],
+          sceneList: sceneList || [],
           compilations: compilations || { matched: [], unmatched: [] },
           sourceUrl: sourceUrl
         };
@@ -456,6 +462,15 @@ export default function GroupDetail() {
     return `${mins}m`;
   };
 
+  const formatClock = (seconds) => {
+    if (!seconds && seconds !== 0) return '';
+    const total = Math.round(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = String(total % 60).padStart(2, '0');
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+  };
+
   if (loading) {
     return (
       <div className="page pad">
@@ -537,6 +552,23 @@ export default function GroupDetail() {
           )}
 
           <div className="group-actions" style={{ margin: '1rem 0', display: 'flex', gap: '0.75rem' }}>
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="edit-group-button"
+              title="Edit this group in Stash"
+              style={{
+                padding: '0.5rem 1rem',
+                background: '#4a5568',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.9rem'
+              }}
+            >
+              ✏️ Edit
+            </button>
+
             <button 
               onClick={() => {
                 const geviScraper = availableScrapers.find(s => s.siteName === 'GEVI');
@@ -718,6 +750,8 @@ export default function GroupDetail() {
               </div>
             </div>
           )}
+
+          <GroupPerformers groupId={group.id} initialPerformers={group.performers} />
         </div>
       </div>
 
@@ -744,6 +778,7 @@ export default function GroupDetail() {
               scenes={scenes} 
               onSceneClick={handleSceneClick}
               onUnlinkClick={handleUnlinkScene}
+              onSplitClick={setSplitScene}
               showSceneNumbers={true}
             />
           ) : (
@@ -981,6 +1016,27 @@ export default function GroupDetail() {
         }
       `}</style>
 
+      {splitScene && (
+        <SplitSceneModal
+          groupId={group.id}
+          scene={splitScene}
+          onClose={() => setSplitScene(null)}
+          onFinished={() => fetchGroup({ silent: true })}
+        />
+      )}
+
+      {/* Edit Group Modal */}
+      {showEditModal && (
+        <EditGroupModal
+          group={group}
+          onClose={() => setShowEditModal(false)}
+          onSaved={async () => {
+            setShowEditModal(false);
+            await fetchGroup();
+          }}
+        />
+      )}
+
       {/* Scrape GEVI Modal */}
       {showScrapeModal && (
         <div className="modal-overlay">
@@ -1211,7 +1267,8 @@ export default function GroupDetail() {
                     <div className="parse-field">
                       <label style={{ display: 'block', fontWeight: '600', marginBottom: '0.5rem', color: '#374151' }}>Duration:</label>
                       <div style={{ padding: '0.5rem', background: '#f9fafb', borderRadius: '4px', border: '1px solid #e5e7eb' }}>
-                        {scrapeData.scraped.duration} minutes
+                        {formatDuration(scrapeData.scraped.duration)}
+                        {scrapeData.scraped.quality && ` · ${scrapeData.scraped.quality}`}
                       </div>
                     </div>
                   )}
@@ -1373,6 +1430,57 @@ export default function GroupDetail() {
                   </div>
                 )}
 
+                {/* Scraped Scene List (AEBN and other scrapers that list scenes with lengths) */}
+                {scrapeData.sceneList && scrapeData.sceneList.length > 0 && (
+                  <div style={{ marginTop: '1.5rem', borderTop: '2px solid #e5e7eb', paddingTop: '1.5rem' }}>
+                    <h4 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.75rem', color: '#1f2937' }}>
+                      🎞️ Scenes ({scrapeData.sceneList.length})
+                      {scrapeData.sceneList.some(s => s.durationSeconds) && (
+                        <span style={{ marginLeft: '0.5rem', fontSize: '0.875rem', fontWeight: '400', color: '#6b7280' }}>
+                          total {formatClock(scrapeData.sceneList.reduce((sum, s) => sum + (s.durationSeconds || 0), 0))}
+                        </span>
+                      )}
+                    </h4>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                      <thead>
+                        <tr style={{ textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
+                          <th style={{ padding: '0.375rem' }}>#</th>
+                          <th style={{ padding: '0.375rem' }}>Length</th>
+                          <th style={{ padding: '0.375rem' }}>Performers</th>
+                          <th style={{ padding: '0.375rem' }}>Your Scene</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {scrapeData.sceneList.map((scene) => (
+                          <tr key={scene.sceneNumber} style={{ borderBottom: '1px solid #f3f4f6', color: '#1f2937' }}>
+                            <td style={{ padding: '0.375rem', fontWeight: '600' }}>{scene.sceneNumber}</td>
+                            <td style={{ padding: '0.375rem', whiteSpace: 'nowrap' }}>
+                              {scene.duration || '—'}
+                              {scene.quality && <span style={{ color: '#9ca3af', marginLeft: '0.375rem' }}>{scene.quality}</span>}
+                            </td>
+                            <td style={{ padding: '0.375rem' }}>
+                              {scene.performers?.length > 0
+                                ? scene.performers.map(p => (typeof p === 'string' ? p : p.name)).join(', ')
+                                : <span style={{ color: '#9ca3af' }}>—</span>}
+                            </td>
+                            <td style={{ padding: '0.375rem' }}>
+                              {scene.match ? (
+                                <span style={{ color: '#15803d' }}>
+                                  ✓ {scene.match.title || scene.match.sceneId}
+                                  {scene.match.duration ? ` (${formatClock(scene.match.duration)})` : ''}
+                                  {scene.match.method && <span style={{ color: '#6b7280' }}> · {scene.match.method}</span>}
+                                </span>
+                              ) : (
+                                <span style={{ color: '#9ca3af' }}>Not in library</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
                 {/* Matched Scenes Section */}
                 {scrapeData.matchedScenes && scrapeData.matchedScenes.length > 0 && (
                   <div style={{ marginTop: '1.5rem', borderTop: '2px solid #e5e7eb', paddingTop: '1.5rem' }}>
@@ -1404,6 +1512,12 @@ export default function GroupDetail() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
                             <div style={{ fontWeight: '600', color: '#15803d', fontSize: '0.875rem' }}>
                               Scene {match.sceneNumber}
+                              {match.duration && (
+                                <span style={{ marginLeft: '0.5rem', fontWeight: '500', color: '#6b7280' }}>
+                                  ⏱️ {match.duration}
+                                  {match.dbSceneDuration ? ` (yours ${formatClock(match.dbSceneDuration)})` : ''}
+                                </span>
+                              )}
                               {match.confidence && (
                                 <span style={{ 
                                   marginLeft: '0.5rem', 
@@ -1427,7 +1541,7 @@ export default function GroupDetail() {
                                   fontSize: '0.7rem',
                                   fontWeight: '500'
                                 }}>
-                                  {match.matchMethod === 'performers' ? '👥' : '#️⃣'} {match.matchMethod}
+                                  {match.matchMethod === 'performers' ? '👥' : match.matchMethod === 'duration' ? '⏱️' : '#️⃣'} {match.matchMethod}
                                 </span>
                               )}
                             </div>

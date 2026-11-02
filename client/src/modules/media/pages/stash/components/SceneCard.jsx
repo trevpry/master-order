@@ -149,9 +149,21 @@ const styles = {
     transition: 'background 0.2s ease',
     marginTop: '0.5rem',
   },
+  splitBtn: {
+    width: '100%',
+    padding: '0.5rem',
+    background: '#7c3aed',
+    color: 'white',
+    border: 'none',
+    borderRadius: '0.375rem',
+    cursor: 'pointer',
+    fontSize: '0.875rem',
+    fontWeight: '600',
+    marginTop: '0.5rem',
+  },
 };
 
-export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onUnlinkClick = null, isSelected = false, onToggleSelect = null }) {
+export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onUnlinkClick = null, onSplitClick = null, isSelected = false, onToggleSelect = null }) {
   const sceneLink = `/media/stash/scenes/${scene.id}`;
   
   const handleMouseEnter = (e) => {
@@ -314,7 +326,7 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onU
           )}
         </div>
         
-        {(onSceneClick || onUnlinkClick) && (
+        {(onSceneClick || onUnlinkClick || onSplitClick) && (
           <div style={styles.actions}>
             {onSceneClick && (
               <button 
@@ -339,6 +351,18 @@ export default function SceneCard({ scene, onSceneClick, sceneNumber = null, onU
                 title="Unlink scene from group"
               >
                 🔗 Unlink from Group
+              </button>
+            )}
+            {onSplitClick && (
+              <button
+                style={styles.splitBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSplitClick(scene);
+                }}
+                title="Split this full movie into individual scenes"
+              >
+                ✂️ Split into Scenes
               </button>
             )}
           </div>

@@ -26,6 +26,17 @@ const PerformerMergeService = require('../services/performerMergeService');
 const ScraperRegistry = require('../services/scrapers/ScraperRegistry');
 const DuplicateDetectionService = require('../services/duplicateDetectionService');
 const StashScrapeAllService = require('../services/stashScrapeAllService');
+const { editGroup: editStashGroup, GroupEditError } = require('../services/stashGroupEditService');
+const {
+  addManualPerformers: addManualGroupPerformers,
+  removePerformer: removeGroupPerformer,
+  reconcileAllGroupPerformers,
+  refreshGroupPerformers,
+  refreshGroupPerformersForScenes,
+  refreshGroupPerformersInBackground
+} = require('../services/stashGroupPerformerService');
+const { upsertSceneFromStash } = require('../services/stashSceneLocalSync');
+const groupSceneSplit = require('../services/groupSceneSplitService');
 const {
   normalizeScrapedPerformers,
   normalizeScrapedTags,
@@ -233,6 +244,24 @@ function generateOptimizedClips(sceneId, sceneDuration, clipDuration = 60) {
   
   return clipsToCreate;
 }
+
+// ===== GROUP PERFORMER AUTO-ATTACH =====
+// Scene performer edits/syncs/merges change which performers a scene's groups should carry.
+const SCENE_PERFORMER_WRITE = /^\/scenes\/([^/]+)(?:\/performers(?:\/[^/]+)?|\/sync)?\/?$/;
+router.use((req, res, next) => {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+  const match = req.path.match(SCENE_PERFORMER_WRITE);
+  if (!match) return next();
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    const sceneIds = match[1] === 'merge'
+      ? [req.body?.primarySceneId, ...(req.body?.mergeSceneIds || [])]
+      : [match[1]];
+    refreshGroupPerformersForScenes(prisma, sceneIds).catch(err =>
+      console.warn('⚠️ [Group Performers] Scene refresh failed:', err.message));
+  });
+  next();
+});
 
 // ===== CONNECTION STATUS =====
 
@@ -3306,6 +3335,7 @@ router.post('/groups/:id/add-scene', asyncHandler(async (req, res) => {
     });
 
     console.log('✅ Scene linked to group in database');
+    refreshGroupPerformersInBackground(prisma, [id]);
 
     // Also update in Stash via GraphQL if we have the IDs
     if (group.id && scene.id) {
@@ -3414,6 +3444,7 @@ router.delete('/groups/:groupId/scenes/:sceneId', asyncHandler(async (req, res) 
   });
 
   console.log('✅ Scene unlinked from group in database');
+  refreshGroupPerformersInBackground(prisma, [groupId]);
 
   // Also update in Stash via GraphQL if we have the IDs
   if (group.id && scene.id) {
@@ -3717,6 +3748,7 @@ router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) =>
   console.log(`   - Created tags: ${results.createdTags}`);
   console.log(`   - Errors: ${results.errors.length}`);
 
+  refreshGroupPerformersInBackground(prisma, [req.params.id]);
   sendSuccess(res, {
     message: 'Action codes applied successfully',
     results
@@ -4017,6 +4049,38 @@ router.post('/groups/:id/scrape-generic', asyncHandler(async (req, res) => {
   if (metadata.image) {
     console.log(`   - Image URL: ${metadata.image}`);
   }
+
+  // Full scraped scene list with lengths, annotated with any local scene it matched
+  const localScenesById = new Map(groupScenes.map(gs => [gs.scene.id, gs.scene]));
+  const scrapedByNumber = new Map((metadata.allScenes || []).map(s => [s.sceneNumber, s]));
+  matchedScenes.forEach(match => {
+    const scraped = scrapedByNumber.get(match.sceneNumber);
+    const local = localScenesById.get(match.sceneId);
+    match.duration = scraped?.duration || null;
+    match.durationSeconds = scraped?.durationSeconds || null;
+    match.quality = scraped?.quality || null;
+    match.dbSceneTitle = match.dbSceneTitle || local?.title || null;
+    match.dbSceneDuration = local?.duration || null;
+  });
+  const sceneList = (metadata.allScenes || []).map(scene => {
+    const match = matchedScenes.find(m => m.sceneNumber === scene.sceneNumber);
+    return {
+      sceneNumber: scene.sceneNumber,
+      title: scene.title,
+      duration: scene.duration || null,
+      durationSeconds: scene.durationSeconds || null,
+      quality: scene.quality || null,
+      performers: scene.performers || [],
+      image: scene.image || null,
+      match: match ? {
+        sceneId: match.sceneId,
+        title: match.dbSceneTitle,
+        duration: match.dbSceneDuration,
+        method: match.matchMethod || null,
+        confidence: match.confidence || null
+      } : null
+    };
+  });
   
   // Return scraped data with matches
   sendSuccess(res, {
@@ -4030,6 +4094,7 @@ router.post('/groups/:id/scrape-generic', asyncHandler(async (req, res) => {
       tags: matchedTags.unmatched
     },
     matchedScenes: matchedScenes, // Include matched scenes like GEVI
+    sceneList,
     source: scraper.siteName,
     sourceUrl: url
   });
@@ -4255,6 +4320,194 @@ router.put('/groups/:id', asyncHandler(async (req, res) => {
   }
 }));
 
+// PATCH /api/stash/groups/:id - Edit group fields in Stash (groupUpdate), then mirror locally.
+// Unlike PUT (scrape merge), present-but-blank fields are cleared and urls/tagIds replace the lists.
+router.patch('/groups/:id', asyncHandler(async (req, res) => {
+  if (!stashSyncService && !stashSyncServiceOptimized) {
+    await initializeStashSyncService();
+  }
+  const syncService = getActiveSyncService();
+  if (!syncService) {
+    return sendServerError(res, 'Stash sync service not initialized');
+  }
+  try {
+    await syncService.ensureConfigLoaded();
+  } catch (error) {
+    return sendServerError(res, 'Stash server not configured. Please configure in Settings.');
+  }
+
+  try {
+    await editStashGroup({
+      prisma,
+      graphql: (query, variables) => syncService.makeGraphQLRequest(query, variables),
+      id: req.params.id,
+      body: req.body || {}
+    });
+  } catch (error) {
+    if (error instanceof GroupEditError) {
+      return res.status(error.status).json({ success: false, error: error.message });
+    }
+    console.error('❌ Error editing group in Stash:', error);
+    return sendServerError(res, `Failed to update group in Stash: ${error.message}`);
+  }
+
+  const group = await prisma.stashGroup.findUnique({
+    where: { id: req.params.id },
+    include: { studio: true, tags: { include: { tag: true } } }
+  });
+  sendSuccess(res, group, 'Group updated in Stash');
+}));
+
+// Stash GraphQL for best-effort mirroring; null when Stash isn't configured/reachable.
+async function getStashGraphqlOrNull() {
+  try {
+    if (!stashSyncService && !stashSyncServiceOptimized) {
+      await initializeStashSyncService();
+    }
+    const syncService = getActiveSyncService();
+    if (!syncService) return null;
+    await syncService.ensureConfigLoaded();
+    return (query, variables) => syncService.makeGraphQLRequest(query, variables);
+  } catch (error) {
+    console.warn('⚠️ Stash GraphQL unavailable:', error.message);
+    return null;
+  }
+}
+
+const groupPerformerList = (groupId) => prisma.stashGroupPerformer.findMany({
+  where: { groupId },
+  include: { performer: { select: { id: true, name: true, image: true, gender: true } } },
+  orderBy: { performer: { name: 'asc' } }
+});
+
+// POST /api/stash/groups/:id/performers { performerIds } - Manually attach performers to a group
+router.post('/groups/:id/performers', asyncHandler(async (req, res) => {
+  const graphql = await getStashGraphqlOrNull();
+  let result;
+  try {
+    result = await addManualGroupPerformers(prisma, req.params.id, req.body?.performerIds, graphql);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, error: error.message });
+    throw error;
+  }
+  sendSuccess(res, { performers: await groupPerformerList(req.params.id), mirroredToStash: result.mirrored });
+}));
+
+// DELETE /api/stash/groups/:id/performers/:performerId - Detach a manually attached performer
+router.delete('/groups/:id/performers/:performerId', asyncHandler(async (req, res) => {
+  const graphql = await getStashGraphqlOrNull();
+  let result;
+  try {
+    result = await removeGroupPerformer(prisma, req.params.id, req.params.performerId, graphql);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, error: error.message });
+    throw error;
+  }
+  sendSuccess(res, {
+    performers: await groupPerformerList(req.params.id),
+    mirroredToStash: result.mirrored,
+    remaining: result.remaining
+  });
+}));
+
+// POST /api/stash/group-performers/reconcile - Re-derive scene performers for all groups and restore manual ones from Stash
+router.post('/group-performers/reconcile', asyncHandler(async (req, res) => {
+  const graphql = await getStashGraphqlOrNull();
+  sendSuccess(res, await reconcileAllGroupPerformers(prisma, graphql));
+}));
+
+// ---------------------------------------------------------------------------
+// Group scene splitting (full movie -> one scene per AEBN scene length)
+// ---------------------------------------------------------------------------
+
+const splitDeps = async () => ({
+  prisma,
+  graphql: await getStashGraphqlOrNull(),
+  geviScraper,
+  actionCodeService,
+  ffmpegPath: require('../config/ffmpegConfig').ffmpegPath || 'ffmpeg',
+  scrapeAebn: async (url) => {
+    const registry = await getScraperRegistry();
+    const aebn = registry.getAllScrapers().find(s => s.siteName === 'AEBN') || new (require('../services/scrapers/AebnScraper'))();
+    return aebn.scrape(url, []);
+  }
+});
+
+const sendSplitError = (res, error) => {
+  if (error instanceof groupSceneSplit.SplitError) {
+    return res.status(error.status).json({ success: false, error: error.message, code: error.code });
+  }
+  throw error;
+};
+
+// POST /api/stash/groups/:id/split/preview { sceneId, aebnUrl?, geviUrl?, offset? } - Cut points + per-scene metadata
+router.post('/groups/:id/split/preview', asyncHandler(async (req, res) => {
+  try {
+    const plan = await groupSceneSplit.buildSplitPlan(await splitDeps(), {
+      groupId: req.params.id,
+      sceneId: String(req.body?.sceneId || ''),
+      aebnUrl: req.body?.aebnUrl || null,
+      geviUrl: req.body?.geviUrl || null,
+      offset: Number(req.body?.offset) || 0
+    });
+    sendSuccess(res, plan);
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+}));
+
+// POST /api/stash/groups/:id/split { sceneId, segments, studioId?, originalAction?, forceTranscode? } - Start a split job
+router.post('/groups/:id/split', asyncHandler(async (req, res) => {
+  try {
+    const job = await groupSceneSplit.startSplitJob(await splitDeps(), req.params.id, req.body || {});
+    sendSuccess(res, groupSceneSplit.getJob(job.id));
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+}));
+
+// GET /api/stash/groups/:id/split-jobs - Recent split jobs for a group (in-memory, newest first)
+router.get('/groups/:id/split-jobs', asyncHandler(async (req, res) => {
+  sendSuccess(res, groupSceneSplit.listJobs(req.params.id));
+}));
+
+// GET /api/stash/group-split-jobs/:jobId - Split job progress
+router.get('/group-split-jobs/:jobId', asyncHandler(async (req, res) => {
+  const job = groupSceneSplit.getJob(req.params.jobId);
+  if (!job) return sendNotFound(res, 'Split job not found');
+  sendSuccess(res, job);
+}));
+
+// POST /api/stash/group-split-jobs/:jobId/cancel - Cancel while files are still being cut
+router.post('/group-split-jobs/:jobId/cancel', asyncHandler(async (req, res) => {
+  try {
+    sendSuccess(res, groupSceneSplit.cancelJob(req.params.jobId));
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+}));
+
+// GET /api/stash/group-edit/lookup?type=studio|tag|performer&q= - Lightweight id/name search for the group editor
+router.get('/group-edit/lookup', asyncHandler(async (req, res) => {
+  const type = ['studio', 'performer'].includes(req.query.type) ? req.query.type : 'tag';
+  const query = String(req.query.q || '').trim().toLowerCase();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+
+  const rows = type === 'studio'
+    ? await prisma.stashStudio.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } })
+    : type === 'performer'
+      ? await prisma.stashPerformer.findMany({ select: { id: true, name: true, disambiguation: true }, orderBy: { name: 'asc' } })
+      : await prisma.stashTag.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } });
+
+  // Filtered in JS so matching is case-insensitive on both SQLite and PostgreSQL
+  const matches = query
+    ? rows
+      .filter(row => row.name.toLowerCase().includes(query))
+      .sort((a, b) => Number(!a.name.toLowerCase().startsWith(query)) - Number(!b.name.toLowerCase().startsWith(query)))
+    : rows;
+  sendSuccess(res, matches.slice(0, limit));
+}));
+
 // POST /api/stash/groups/merge - Merge multiple groups into one
 router.post('/groups/merge', asyncHandler(async (req, res) => {
   const { primaryGroupId, mergeGroupIds, mergedData } = req.body;
@@ -4354,12 +4607,32 @@ router.post('/groups/merge', asyncHandler(async (req, res) => {
 
     console.log(`✅ Added ${sceneLinks.length} scene links to primary group`);
 
+    // Carry manually attached performers over before the merged groups (and their links) are deleted
+    const mergedManualPerformers = await prisma.stashGroupPerformer.findMany({
+      where: { groupId: { in: mergeGroupIds }, source: 'manual' },
+      select: { performerId: true }
+    });
+
     // Delete merged groups from database
     await prisma.stashGroup.deleteMany({
       where: { id: { in: mergeGroupIds } }
     });
 
     console.log(`🗑️  Deleted ${mergeGroupIds.length} merged groups`);
+
+    try {
+      if (mergedManualPerformers.length > 0) {
+        await addManualGroupPerformers(
+          prisma,
+          primaryGroupId,
+          mergedManualPerformers.map(p => p.performerId),
+          await getStashGraphqlOrNull()
+        );
+      }
+      await refreshGroupPerformers(prisma, [primaryGroupId]);
+    } catch (performerError) {
+      console.warn('⚠️  Could not carry group performers over during merge:', performerError.message);
+    }
 
     // Fetch updated primary group with all scenes
     const finalGroup = await prisma.stashGroup.findUnique({
@@ -10016,189 +10289,7 @@ router.post('/scenes/:id/sync', asyncHandler(async (req, res) => {
 
     console.log(`   - Found scene in Stash: ${scene.title}`);
 
-    // Process scene data - adapted from StashSyncService.syncScenes()
-    const primaryFile = scene.files && scene.files.length > 0 ? scene.files[0] : null;
-    
-    // DEBUG: Log file metadata
-    if (primaryFile) {
-      console.log(`   📹 File metadata:`, {
-        size: primaryFile.size,
-        width: primaryFile.width,
-        height: primaryFile.height,
-        video_codec: primaryFile.video_codec,
-        audio_codec: primaryFile.audio_codec,
-        frame_rate: primaryFile.frame_rate,
-        bit_rate: primaryFile.bit_rate
-      });
-    } else {
-      console.log(`   ⚠️ No file data available`);
-    }
-    
-    // Validate foreign key references
-    let validatedStudioId = null;
-    if (scene.studio?.id) {
-      const studioExists = await prisma.stashStudio.findUnique({
-        where: { id: scene.studio.id }
-      });
-      if (studioExists) {
-        validatedStudioId = scene.studio.id;
-      } else {
-        console.log(`   ⚠️ Studio ${scene.studio.id} not found, setting studioId to null`);
-      }
-    }
-
-    const sceneData = {
-      id: scene.id,
-      title: scene.title || '',
-      details: scene.details || null,
-      url: scene.url || null,
-      date: scene.date || null,
-      rating: scene.rating100 ? Math.round(scene.rating100 / 20) : null,
-      organized: scene.organized || false,
-      osHash: null,
-      checksum: null,
-      phash: null,
-      oCounter: scene.o_counter || null,
-      path: primaryFile?.path || null,
-      fileModTime: null,
-      // File metadata
-      fileSize: primaryFile?.size || null,
-      duration: primaryFile?.duration || null,
-      width: primaryFile?.width || null,
-      height: primaryFile?.height || null,
-      videoCodec: primaryFile?.video_codec || null,
-      audioCodec: primaryFile?.audio_codec || null,
-      frameRate: primaryFile?.frame_rate || null,
-      bitrate: primaryFile?.bit_rate || null,
-      // Studio and other metadata
-      studio: scene.studio?.name || null,
-      studioId: validatedStudioId,
-      code: null,
-      director: null,
-      synopsis: null,
-      lastPlayedAt: null,
-      resumeTime: null,
-      playDuration: null,
-      playCount: null,
-      lastSyncedAt: new Date()
-    };
-
-    // Upsert scene
-    const syncedScene = await prisma.stashScene.upsert({
-      where: { id: scene.id },
-      update: sceneData,
-      create: sceneData
-    });
-
-    console.log(`   - Synced scene data to database`);
-
-    // Sync performers - PRESERVE LOCAL TAGS/NOTES
-    if (scene.performers && scene.performers.length > 0) {
-      // Get existing performer relationships with their tags (action codes)
-      const existingRelationships = await prisma.stashScenePerformer.findMany({
-        where: { sceneId: scene.id },
-        include: {
-          tags: true
-        }
-      });
-
-      // Create a map of existing relationships that have tags or notes
-      const relationshipsWithData = new Map();
-      existingRelationships.forEach(rel => {
-        if (rel.tags.length > 0 || rel.notes) {
-          relationshipsWithData.set(rel.performerId, rel);
-        }
-      });
-
-      // Build set of performer IDs from Stash
-      const stashPerformerIds = new Set();
-      const validPerformers = [];
-      
-      for (const performer of scene.performers) {
-        const performerExists = await prisma.stashPerformer.findUnique({
-          where: { id: performer.id }
-        });
-        if (performerExists) {
-          validPerformers.push(performer);
-          stashPerformerIds.add(performer.id);
-        } else {
-          console.log(`   ⚠️ Skipping performer ${performer.id} - not found in database`);
-        }
-      }
-
-      // Remove only relationships that:
-      // 1. Are NOT in the current Stash data, AND
-      // 2. Don't have any local tags or notes
-      const performersToRemove = existingRelationships
-        .filter(rel => !stashPerformerIds.has(rel.performerId) && !relationshipsWithData.has(rel.performerId))
-        .map(rel => rel.performerId);
-
-      if (performersToRemove.length > 0) {
-        await prisma.stashScenePerformer.deleteMany({
-          where: { 
-            sceneId: scene.id,
-            performerId: { in: performersToRemove }
-          }
-        });
-        console.log(`   🗑️ Removed ${performersToRemove.length} performer(s) no longer in Stash (without local data)`);
-      }
-
-      // Upsert performers to preserve existing tags/notes
-      if (validPerformers.length > 0) {
-        for (const performer of validPerformers) {
-          await prisma.stashScenePerformer.upsert({
-            where: {
-              sceneId_performerId: {
-                sceneId: scene.id,
-                performerId: performer.id
-              }
-            },
-            update: {
-              // Don't overwrite notes or tags - keep existing local data
-            },
-            create: {
-              sceneId: scene.id,
-              performerId: performer.id
-            }
-          });
-        }
-        
-        const preserved = validPerformers.filter(p => relationshipsWithData.has(p.id)).length;
-        console.log(`   - Synced ${validPerformers.length} performers`);
-        if (preserved > 0) {
-          console.log(`   💾 Preserved ${preserved} performer(s) with action codes/notes`);
-        }
-      }
-    }
-
-    // Sync tags
-    if (scene.tags && scene.tags.length > 0) {
-      await prisma.stashSceneTag.deleteMany({
-        where: { sceneId: scene.id }
-      });
-
-      const validTags = [];
-      for (const tag of scene.tags) {
-        const tagExists = await prisma.stashTag.findUnique({
-          where: { id: tag.id }
-        });
-        if (tagExists) {
-          validTags.push(tag);
-        } else {
-          console.log(`   ⚠️ Skipping tag ${tag.id} - not found in database`);
-        }
-      }
-
-      if (validTags.length > 0) {
-        await prisma.stashSceneTag.createMany({
-          data: validTags.map(tag => ({
-            sceneId: scene.id,
-            tagId: tag.id
-          }))
-        });
-        console.log(`   - Synced ${validTags.length} tags`);
-      }
-    }
+    await upsertSceneFromStash(prisma, scene);
 
     console.log(`✅ [Sync Scene] Scene ${sceneId} synced successfully`);
     sendSuccess(res, { sceneId, title: scene.title });

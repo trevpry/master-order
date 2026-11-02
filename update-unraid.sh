@@ -40,6 +40,14 @@ BACKGROUND_STORAGE_CONTAINER_PATH="/mnt/user/Media/Other/Images/background-image
 # Windows UNC path users will set this in Media Settings UI:
 # \\tower\Media\Other\Images\background-images
 BACKGROUND_UNC_PATH_MAPPINGS="//${UNRAID_SERVER_NAME}/Media/Other/Images/background-images=${BACKGROUND_STORAGE_CONTAINER_PATH}"
+
+# Stash library (read/write) - used by group scene splitting, which writes the split files next to the original.
+# STASH_LIBRARY_STASH_PATH is the library root as Stash reports it (Stash container path, e.g. /data/P_Video2/...).
+# STASH_LIBRARY_HOST_PATH is that same folder on the Unraid host (the host side of Stash's /data mapping).
+# If the host path doesn't exist the mount is skipped and splitting reports that the files aren't reachable.
+STASH_LIBRARY_HOST_PATH="/mnt/user/Media/Other"
+STASH_LIBRARY_STASH_PATH="/data"
+STASH_LIBRARY_CONTAINER_PATH="/stash-library"
 RUN_MIGRATION_AFTER_DEPLOY=false
 CURRENT_BACKUP_FILE=""
 PRE_DEPLOY_COUNTS_FILE=""
@@ -297,6 +305,17 @@ require_existing_directory "/mnt/user/appdata/master-order/data" "Persistent app
 require_existing_directory "/mnt/user/appdata/master-order/artwork-cache" "Artwork cache"
 require_existing_directory "/mnt/user/appdata/master-order/logs" "Application logs"
 require_existing_directory "$BACKGROUND_STORAGE_HOST_PATH" "Background image storage"
+
+STASH_LIBRARY_DOCKER_ARGS=()
+if [ -n "$STASH_LIBRARY_HOST_PATH" ] && [ -d "$STASH_LIBRARY_HOST_PATH" ]; then
+    STASH_LIBRARY_DOCKER_ARGS=(
+        -v "${STASH_LIBRARY_HOST_PATH}:${STASH_LIBRARY_CONTAINER_PATH}:rw,slave"
+        -e "STASH_PATH_MAP=${STASH_LIBRARY_STASH_PATH}=${STASH_LIBRARY_CONTAINER_PATH}"
+    )
+    log_success "Stash library mount: ${STASH_LIBRARY_HOST_PATH} -> ${STASH_LIBRARY_CONTAINER_PATH} (Stash path ${STASH_LIBRARY_STASH_PATH})"
+else
+    log_warning "Stash library host path not found (${STASH_LIBRARY_HOST_PATH}); group scene splitting will be unavailable"
+fi
 
 # Function to test PostgreSQL connectivity (skip if tools not available)
 test_postgresql_connection() {
@@ -674,6 +693,7 @@ docker run -d \
     -e "STASH_URL_FALLBACK_2=http://192.168.1.116:9999" \
     -e "STASH_URL_FALLBACK_3=http://localhost:9999" \
     -e "STASH_URL_FALLBACK_4=http://host.docker.internal:9999" \
+    ${STASH_LIBRARY_DOCKER_ARGS[@]+"${STASH_LIBRARY_DOCKER_ARGS[@]}"} \
     $IMAGE_NAME
 
 if [ $? -ne 0 ]; then

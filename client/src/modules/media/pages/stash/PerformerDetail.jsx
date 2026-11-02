@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import PerformerScrapeAllReviewModal from './components/PerformerScrapeAllReviewModal';
+import PerformerGroupsCard from './components/PerformerGroupsCard';
 import config from '../../../../config';
 
 // Helper function to convert cm to feet and inches
@@ -2086,6 +2087,8 @@ export default function PerformerDetail() {
             </div>
           )}
         </div>
+
+        <PerformerGroupsCard performerId={id} />
 
         {/* Scenes Section */}
         {data.scenes && data.scenes.length > 0 && (

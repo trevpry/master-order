@@ -1478,6 +1478,7 @@ model StashGroup {
   lastSyncedAt    DateTime?
   scenes          StashGroupScene[]
   tags            StashGroupTag[]
+  performers      StashGroupPerformer[]
 
   @@map("StashGroup")
 }
@@ -1503,6 +1504,19 @@ model StashGroupTag {
 
   @@id([groupId, tagId])
   @@map("StashGroupTag")
+}
+
+model StashGroupPerformer {
+  groupId     String
+  performerId String
+  source      String         @default("manual") // "manual" (user-attached) | "scene" (from a scene in the group)
+  group       StashGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  performer   StashPerformer @relation(fields: [performerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now())
+
+  @@id([groupId, performerId])
+  @@index([performerId])
+  @@map("StashGroupPerformer")
 }
 
 model StashClip {
@@ -1607,6 +1621,7 @@ model StashPerformer {
   images          StashImagePerformer[]
   tags            StashPerformerTag[]
   scenes          StashScenePerformer[]
+  groups          StashGroupPerformer[]
   clipTags        StashClipPerformerTag[]
 
   @@map("StashPerformer")
