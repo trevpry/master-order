@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import config from '../../../../../config';
+import SplitTimeline, { formatPreciseClock } from './SplitTimeline';
 
 const formatClock = (seconds) => {
   if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return '';
@@ -142,6 +143,15 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
   const updateSegment = (index, patch) => {
     setSegments(prev => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   };
+
+  const setCutTimes = useCallback((refs, seconds) => {
+    const text = formatPreciseClock(seconds);
+    setSegments(prev => prev.map((s, i) => {
+      const fields = refs.filter(r => r.index === i);
+      if (!fields.length) return s;
+      return fields.reduce((acc, r) => ({ ...acc, [r.field]: text }), s);
+    }));
+  }, []);
 
   const removeChip = (index, key, id) => {
     setSegments(prev => prev.map((s, i) => (i === index ? { ...s, [key]: s[key].filter(x => x.id !== id) } : s)));
@@ -310,6 +320,16 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                   <p className="ssm-error">Can't access the video file from the server: {plan.fileAccess.error}</p>
                 )}
                 {plan.warnings?.map((w, i) => <p key={i} className="ssm-warning">⚠️ {w}</p>)}
+
+                <SplitTimeline
+                  duration={plan.source.duration}
+                  segments={segments}
+                  errors={segmentErrors}
+                  media={plan.source.media}
+                  preferHls={Boolean(plan.transcodeReason)}
+                  parseClock={parseClock}
+                  onSetTimes={setCutTimes}
+                />
 
                 <table className="ssm-table">
                   <thead>

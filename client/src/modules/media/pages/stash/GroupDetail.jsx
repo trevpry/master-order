@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import Button from '../../../../shared/components/Button';
 import SceneGrid from './components/SceneGrid';
 import EditGroupModal from './components/EditGroupModal';
@@ -16,6 +17,9 @@ export default function GroupDetail() {
   const [showScrapeModal, setShowScrapeModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [splitScene, setSplitScene] = useState(null);
+  const [selectedSceneIds, setSelectedSceneIds] = useState([]);
+  const [bulkDeleteFiles, setBulkDeleteFiles] = useState(true);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [isScraping, setIsScraping] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -452,6 +456,52 @@ export default function GroupDetail() {
     }
   };
 
+  const toggleSceneSelection = (sceneId) => {
+    setSelectedSceneIds(prev => (prev.includes(sceneId) ? prev.filter(x => x !== sceneId) : [...prev, sceneId]));
+  };
+
+  const handleBulkDeleteScenes = async (sceneIds) => {
+    if (sceneIds.length === 0) return;
+    const confirmed = window.confirm(
+      `⚠️ Delete ${sceneIds.length} scene(s) from "${group.name}"?\n\n` +
+      `This deletes the scenes from Stash and your local database, along with their clips` +
+      (bulkDeleteFiles ? ` AND their video files on disk.` : `. The video files stay on disk.`) +
+      `\n\nThis cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setBulkDeleting(true);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/bulk-delete`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sceneIds, deleteFile: bulkDeleteFiles, deleteGenerated: true })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Failed to delete scenes');
+
+      const failed = (result.results || []).filter(r => !r.success);
+      const stashFailed = (result.results || []).filter(r => r.success && r.stashError);
+      if (failed.length > 0 || stashFailed.length > 0) {
+        console.error('Bulk delete problems:', [...failed, ...stashFailed]);
+        toast.error(
+          `Deleted ${result.successCount - stashFailed.length} of ${sceneIds.length} scene(s). ` +
+          `${failed.length + stashFailed.length} had problems — see the console.`,
+          { duration: 6000 }
+        );
+      } else {
+        toast.success(`Deleted ${result.successCount} scene(s)`);
+      }
+      setSelectedSceneIds([]);
+      await fetchGroup({ silent: true });
+    } catch (error) {
+      console.error('❌ Bulk delete error:', error);
+      toast.error(`Failed to delete scenes: ${error.message}`);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const formatDuration = (seconds) => {
     if (!seconds) return '';
     const hours = Math.floor(seconds / 3600);
@@ -772,15 +822,44 @@ export default function GroupDetail() {
           const handleSceneClick = (scene) => {
             navigate(`/media/stash/scenes/${scene.id}`);
           };
+
+          const visibleSelected = selectedSceneIds.filter(id => scenes.some(s => s.id === id));
+          const allSelected = scenes.length > 0 && visibleSelected.length === scenes.length;
           
           return scenes.length > 0 ? (
-            <SceneGrid 
-              scenes={scenes} 
-              onSceneClick={handleSceneClick}
-              onUnlinkClick={handleUnlinkScene}
-              onSplitClick={setSplitScene}
-              showSceneNumbers={true}
-            />
+            <>
+              <div className="group-bulk-bar">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={() => setSelectedSceneIds(allSelected ? [] : scenes.map(s => s.id))}
+                  />
+                  <span>Select all ({visibleSelected.length} selected)</span>
+                </label>
+                {visibleSelected.length > 0 && (
+                  <>
+                    <label title="When unchecked, scenes are removed from Stash but the video files stay on disk">
+                      <input type="checkbox" checked={bulkDeleteFiles} onChange={(e) => setBulkDeleteFiles(e.target.checked)} />
+                      <span>Also delete video files</span>
+                    </label>
+                    <button className="group-bulk-delete" onClick={() => handleBulkDeleteScenes(visibleSelected)} disabled={bulkDeleting}>
+                      {bulkDeleting ? 'Deleting…' : `🗑️ Delete ${visibleSelected.length} Scene(s)`}
+                    </button>
+                    <button className="group-bulk-clear" onClick={() => setSelectedSceneIds([])} disabled={bulkDeleting}>Clear</button>
+                  </>
+                )}
+              </div>
+              <SceneGrid 
+                scenes={scenes} 
+                onSceneClick={handleSceneClick}
+                onUnlinkClick={handleUnlinkScene}
+                onSplitClick={setSplitScene}
+                showSceneNumbers={true}
+                selectedScenes={visibleSelected}
+                onToggleSelect={toggleSceneSelection}
+              />
+            </>
           ) : (
             <p className="muted">No scenes in this group</p>
           );
@@ -788,6 +867,28 @@ export default function GroupDetail() {
       </div>
 
       <style>{`
+        .group-bulk-bar {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 1rem;
+          padding: 0.75rem 1rem;
+          margin-bottom: 1rem;
+          border-radius: 0.5rem;
+          background: rgba(127, 127, 127, 0.1);
+        }
+        .group-bulk-bar label { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+        .group-bulk-delete, .group-bulk-clear {
+          padding: 0.45rem 0.9rem;
+          border-radius: 0.375rem;
+          border: none;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .group-bulk-delete { background: #dc2626; color: #fff; }
+        .group-bulk-clear { background: #e5e7eb; color: #111827; }
+        .group-bulk-delete:disabled, .group-bulk-clear:disabled { opacity: 0.6; cursor: not-allowed; }
+
         .group-header {
           display: grid;
           grid-template-columns: 600px 1fr;

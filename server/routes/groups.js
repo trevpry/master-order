@@ -12,7 +12,7 @@ const prisma = new PrismaClient();
 // Backfill scene-derived group performers shortly after startup (covers groups synced before this feature)
 setTimeout(() => {
   refreshGroupPerformers(prisma)
-    .then(r => (r.created || r.removed) && console.log(`👥 [Group Performers] Startup refresh: +${r.created} / -${r.removed}`))
+    .then(r => (r.created || r.promoted) && console.log(`👥 [Group Performers] Startup refresh: +${r.created}, ${r.promoted} kept as manual`))
     .catch(err => console.warn('⚠️ [Group Performers] Startup refresh failed:', err.message));
 }, 30000).unref();
 

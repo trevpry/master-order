@@ -52,6 +52,19 @@ test('stash paths map to local paths and output names are stable', () => {
   assert.strictEqual(split.outputFileName('My: Movie.wmv', 3), 'My Movie - Scene 03.mp4');
 });
 
+test('sceneMediaUrls derives browser preview URLs from Stash scene paths', () => {
+  const media = split.sceneMediaUrls({
+    stream: 'http://stash:9999/scene/7978/stream',
+    vtt: 'http://stash:9999/scene/abc_thumbs.vtt',
+    screenshot: 'http://stash:9999/scene/7978/screenshot?t=1'
+  });
+  assert.strictEqual(media.directUrl, 'http://stash:9999/scene/7978/stream');
+  assert.strictEqual(media.hlsUrl, 'http://stash:9999/scene/7978/stream.m3u8?resolution=STANDARD');
+  assert.strictEqual(media.vttUrl, 'http://stash:9999/scene/abc_thumbs.vtt');
+  assert.strictEqual(split.sceneMediaUrls(null), null);
+  assert.strictEqual(split.sceneMediaUrls({ stream: null }), null);
+});
+
 test('mergeScenePerformers keeps GEVI action codes and dedupes names', () => {
   const merged = split.mergeScenePerformers(
     [{ name: 'Billie Ramos' }, { name: 'Diego Starr' }],

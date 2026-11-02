@@ -193,8 +193,29 @@ const SCENE_QUERY = `query SplitScene($id: ID!) {
     studio { id name }
     groups { group { id } scene_index }
     files { id path basename duration video_codec audio_codec format size width height }
+    paths { stream vtt sprite screenshot }
   }
 }`;
+
+/** Browser-playable URLs for the split timeline: direct stream, transcoded HLS (AVI/WMV etc.) and sprite VTT. */
+function sceneMediaUrls(paths) {
+  if (!paths?.stream) return null;
+  let hlsUrl = null;
+  try {
+    const url = new URL(paths.stream);
+    url.pathname = `${url.pathname.replace(/\/$/, '')}.m3u8`;
+    url.searchParams.set('resolution', 'STANDARD');
+    hlsUrl = url.toString();
+  } catch {
+    hlsUrl = null;
+  }
+  return {
+    directUrl: paths.stream,
+    hlsUrl,
+    vttUrl: paths.vtt || null,
+    screenshotUrl: paths.screenshot || null
+  };
+}
 
 async function loadStashGroupAndScene(graphql, groupId, sceneId) {
   const [groupData, sceneData] = await Promise.all([
@@ -374,7 +395,8 @@ async function buildSplitPlan(deps, { groupId, sceneId, aebnUrl: aebnOverride, g
       videoCodec: file.video_codec,
       audioCodec: file.audio_codec,
       width: file.width,
-      height: file.height
+      height: file.height,
+      media: sceneMediaUrls(scene.paths)
     },
     aebnUrl,
     geviUrl,
@@ -721,6 +743,7 @@ module.exports = {
   parseStashPathMap,
   stashPathToLocal,
   transcodeReason,
+  sceneMediaUrls,
   buildSegments,
   validateSegments,
   outputFileName,

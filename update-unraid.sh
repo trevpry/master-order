@@ -14,6 +14,10 @@
 
 set -euo pipefail
 
+# Fingerprint of the script as it is being run, so we can restart with the pulled version if it changed
+SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+SELF_CHECKSUM="$(cksum < "$SELF_PATH" 2>/dev/null || true)"
+
 # ===============================================================================
 # CONFIGURATION SECTION - UPDATE THESE VALUES FOR YOUR ENVIRONMENT
 # ===============================================================================
@@ -114,6 +118,15 @@ else
         echo "❌ Failed to update code. Please check your git repository."
         exit 1
     fi
+fi
+
+# Bash keeps executing the copy it already loaded, so new deploy settings (mounts, env vars) in the
+# freshly pulled script would only apply on the next run. Restart once with the pulled version instead.
+PULLED_SCRIPT="$REPO_PATH/update-unraid.sh"
+if [ -z "${UPDATE_UNRAID_RESTARTED:-}" ] && [ -f "$PULLED_SCRIPT" ] && [ "$(cksum < "$PULLED_SCRIPT")" != "$SELF_CHECKSUM" ]; then
+    echo "🔁 update-unraid.sh changed in the pull; restarting with the new version..."
+    export UPDATE_UNRAID_RESTARTED=1
+    exec bash "$PULLED_SCRIPT" "$@"
 fi
 
 # ===============================================================================

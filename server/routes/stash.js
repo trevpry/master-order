@@ -33,7 +33,8 @@ const {
   reconcileAllGroupPerformers,
   refreshGroupPerformers,
   refreshGroupPerformersForScenes,
-  refreshGroupPerformersInBackground
+  refreshGroupPerformersInBackground,
+  setGraphqlProvider: setGroupPerformerGraphqlProvider
 } = require('../services/stashGroupPerformerService');
 const { upsertSceneFromStash } = require('../services/stashSceneLocalSync');
 const groupSceneSplit = require('../services/groupSceneSplitService');
@@ -4373,6 +4374,9 @@ async function getStashGraphqlOrNull() {
     return null;
   }
 }
+
+// Performers kept on a group after their scenes leave it are mirrored to Stash so they survive a resync
+setGroupPerformerGraphqlProvider(getStashGraphqlOrNull);
 
 const groupPerformerList = (groupId) => prisma.stashGroupPerformer.findMany({
   where: { groupId },
@@ -10321,6 +10325,12 @@ router.delete('/scenes/bulk-delete', asyncHandler(async (req, res) => {
   const stashUrl = settings?.stashUrl;
   const stashApiKey = settings?.stashApiKey;
 
+  // Group links cascade away with the scene, so remember the groups to re-derive their performers afterwards
+  const affectedGroupIds = [...new Set((await prisma.stashGroupScene.findMany({
+    where: { sceneId: { in: sceneIds.map(String) } },
+    select: { groupId: true }
+  })).map(l => l.groupId))];
+
   for (const sceneId of sceneIds) {
     try {
       console.log(`   Processing scene ${sceneId}...`);
@@ -10431,6 +10441,7 @@ router.delete('/scenes/bulk-delete', asyncHandler(async (req, res) => {
   }
 
   console.log(`✅ Bulk delete complete: ${successCount} succeeded, ${failCount} failed`);
+  if (affectedGroupIds.length > 0) refreshGroupPerformersInBackground(prisma, affectedGroupIds);
 
   res.json({
     success: true,

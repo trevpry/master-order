@@ -2,13 +2,21 @@
  * Group performers.
  *
  * Stash groups have no performer field, so performers are attached locally (StashGroupPerformer):
- * - source "scene": derived from the performers of the group's scenes; recomputed by refreshGroupPerformers.
- * - source "manual": attached by the user; kept even if no scene contains them. Manual ids are mirrored to
- *   the Stash group's custom field (MANUAL_FIELD) so they survive a local resync/reset.
+ * - source "scene": derived from the performers of the group's scenes; added by refreshGroupPerformers.
+ * - source "manual": attached by the user, or a scene performer whose scenes all left the group. Kept until
+ *   explicitly removed. Manual ids are mirrored to the Stash group's custom field (MANUAL_FIELD) so they
+ *   survive a local resync/reset.
+ * Refreshes never detach anyone; performers only leave a group through removePerformer.
  */
 
 const MANUAL_FIELD = 'master_order_performer_ids';
 const CHUNK = 200;
+
+// Optional () => graphql|null used to mirror links that refreshes promote to manual
+let graphqlProvider = null;
+function setGraphqlProvider(provider) {
+  graphqlProvider = typeof provider === 'function' ? provider : null;
+}
 
 const pairKey = (groupId, performerId) => `${groupId}|${performerId}`;
 
@@ -20,7 +28,7 @@ const chunk = (items, size = CHUNK) => {
 
 /**
  * Pure diff between scene-derived performers and existing links.
- * Manual links are never removed here; scene links whose performer left the group's scenes are.
+ * Nothing is ever removed: scene links whose performer left every scene of the group are promoted to manual.
  */
 function diffGroupPerformers(desiredPairs, existingLinks) {
   const existing = new Map(existingLinks.map(l => [pairKey(l.groupId, l.performerId), l]));
@@ -35,19 +43,19 @@ function diffGroupPerformers(desiredPairs, existingLinks) {
     toCreate.push({ groupId: pair.groupId, performerId: pair.performerId, source: 'scene' });
   }
 
-  const toDelete = existingLinks
+  const toPromote = existingLinks
     .filter(l => l.source === 'scene' && !desired.has(pairKey(l.groupId, l.performerId)))
     .map(l => ({ groupId: l.groupId, performerId: l.performerId }));
 
-  return { toCreate, toDelete };
+  return { toCreate, toPromote };
 }
 
 /**
- * Attach the performers of each group's scenes to the group (and detach scene-derived performers that
- * no longer appear in any of its scenes). Pass groupIds to limit the refresh; omit to refresh all groups.
+ * Attach the performers of each group's scenes to the group. Scene-derived performers that no longer appear
+ * in any of its scenes stay attached as manual links. Pass groupIds to limit the refresh; omit for all groups.
  */
 async function refreshGroupPerformers(prisma, groupIds = null) {
-  if (Array.isArray(groupIds) && groupIds.length === 0) return { created: 0, removed: 0 };
+  if (Array.isArray(groupIds) && groupIds.length === 0) return { created: 0, promoted: 0 };
   const groupFilter = groupIds ? { groupId: { in: groupIds } } : {};
 
   const groupScenes = await prisma.stashGroupScene.findMany({
@@ -69,22 +77,28 @@ async function refreshGroupPerformers(prisma, groupIds = null) {
     select: { groupId: true, performerId: true, source: true }
   });
 
-  const { toCreate, toDelete } = diffGroupPerformers(desiredPairs, existingLinks);
+  const { toCreate, toPromote } = diffGroupPerformers(desiredPairs, existingLinks);
 
   for (const batch of chunk(toCreate)) {
     await prisma.stashGroupPerformer.createMany({ data: batch });
   }
-  for (const batch of chunk(toDelete)) {
-    await prisma.stashGroupPerformer.deleteMany({ where: { source: 'scene', OR: batch } });
+  for (const batch of chunk(toPromote)) {
+    await prisma.stashGroupPerformer.updateMany({ where: { source: 'scene', OR: batch }, data: { source: 'manual' } });
   }
 
-  return { created: toCreate.length, removed: toDelete.length };
+  const promotedGroups = [...new Set(toPromote.map(p => p.groupId))];
+  if (promotedGroups.length > 0 && graphqlProvider) {
+    const graphql = await Promise.resolve(graphqlProvider()).catch(() => null);
+    for (const groupId of promotedGroups) await mirrorManualToStash(prisma, groupId, graphql);
+  }
+
+  return { created: toCreate.length, promoted: toPromote.length };
 }
 
 /** Refresh every group containing any of the given scenes. */
 async function refreshGroupPerformersForScenes(prisma, sceneIds) {
   const ids = (Array.isArray(sceneIds) ? sceneIds : [sceneIds]).filter(Boolean).map(String);
-  if (ids.length === 0) return { created: 0, removed: 0 };
+  if (ids.length === 0) return { created: 0, promoted: 0 };
   const links = await prisma.stashGroupScene.findMany({
     where: { sceneId: { in: ids } },
     select: { groupId: true }
@@ -247,12 +261,13 @@ async function reconcileAllGroupPerformers(prisma, graphql = null) {
   } catch (error) {
     console.warn('⚠️ [Group Performers] Could not restore manual performers from Stash:', error.message);
   }
-  console.log(`👥 [Group Performers] Reconciled: +${scene.created} / -${scene.removed} scene links, ${manual.restored} manual restored`);
+  console.log(`👥 [Group Performers] Reconciled: +${scene.created} scene links, ${scene.promoted} kept as manual, ${manual.restored} manual restored`);
   return { ...scene, restored: manual.restored };
 }
 
 module.exports = {
   MANUAL_FIELD,
+  setGraphqlProvider,
   diffGroupPerformers,
   refreshGroupPerformers,
   refreshGroupPerformersForScenes,

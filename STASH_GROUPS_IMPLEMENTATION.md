@@ -159,8 +159,8 @@ model StashGroupTag {
 
 ### 9. Group Performers ✅
 Stash groups have no performer field, so links live in the local `StashGroupPerformer` table (`groupId`, `performerId`, `source`). Logic is in `server/services/stashGroupPerformerService.js`.
-- **`source: "scene"`** links are derived automatically from the performers of the group's scenes. They are refreshed after a full sync, when a group is opened, when filtering groups by performer, after group scene add/remove/apply-matched, and after any scene or scene-performer edit/merge. Scene links whose performer leaves every scene in the group are removed.
-- **`source: "manual"`** links are attached by the user and kept even when no scene contains the performer. Their ids are mirrored to the Stash group custom field `master_order_performer_ids` (comma list). After a full sync they are restored from there, add-only.
+- **`source: "scene"`** links are derived automatically from the performers of the group's scenes. They are added after a full sync, when a group is opened, when filtering groups by performer, after group scene add/remove/apply-matched/delete, and after any scene or scene-performer edit/merge. Refreshes never detach anyone: when a performer's scenes all leave the group (scene deleted, unlinked or split), the link becomes manual so the performer stays until removed explicitly.
+- **`source: "manual"`** links are attached by the user, or kept from deleted scenes as above. They stay even when no scene contains the performer. Their ids are mirrored to the Stash group custom field `master_order_performer_ids` (comma list). After a full sync they are restored from there, add-only.
 
 **API:**
 - `POST /api/stash/groups/:id/performers {performerIds}` attaches performers. An existing scene link is promoted to manual.
@@ -184,6 +184,12 @@ On GroupDetail each scene card has **✂️ Split into Scenes**. It turns a full
    - Builds cut points back to back from `offset`. Leftover time of up to 180s (credits) is folded into the last scene; larger gaps produce a warning.
    - Per scene it merges AEBN performers/tags with GEVI scene performers (action codes), details and episode URL, then matches them to the library.
    - The modal lets you edit start/end times, titles, performers and tags, and skip scenes.
+   - **Visual cut editor** (`components/SplitTimeline.jsx`): the preview's `source.media` holds `{directUrl, hlsUrl, vttUrl, screenshotUrl}`, taken from Stash `paths`.
+     - The video player tries the direct stream first; AVI/WMV start on Stash's transcoded HLS (`stream.m3u8?resolution=STANDARD`).
+     - The timeline shows colored scene blocks over a sprite filmstrip from the VTT, plus a dotted marker at each AEBN length. Skipped scenes are hatched and invalid ones are outlined in red.
+     - Drag a yellow cut handle to move it; dragging seeks the video. A shared boundary moves the end of one scene and the start of the next together.
+     - With a cut selected you can nudge it (±0.1/1/5s, or ←/→, Shift = 5s, Alt = 0.1s), set it to the current video time, preview it from 5s before, or step to the previous/next cut.
+     - Zoom goes up to 10×. Edits write back into the table's start/end fields to 0.1s precision.
 2. **Job:** `POST /api/stash/groups/:id/split {sceneId, segments, studioId?, originalAction: unlink|keep|delete, forceTranscode?}` queues an in-memory job; jobs run one at a time.
    - **Cut:** ffmpeg writes `"<file> - Scene NN.mp4"` next to the source.
      - MP4/MOV/MKV with H.264/HEVC + AAC/MP3 is stream-copied (fast and lossless, but cuts snap to keyframes).
