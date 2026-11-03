@@ -218,6 +218,11 @@ On GroupDetail each scene card has **✂️ Split into Scenes**. It turns a full
 3. **File access:** the server must see Stash's files. `STASH_PATH_MAP=/data=/stash-library` (semicolon-separated `stashPrefix=localPrefix` pairs) maps Stash paths to server paths. Otherwise it falls back to the library path mappings.
    - `update-unraid.sh` mounts `STASH_LIBRARY_HOST_PATH` (`/mnt/user/Media/Other`, the host folder behind the Stash container's `/data`) at `/stash-library` read-write and sets the map.
    - ffmpeg is installed in the production images. `ffmpeg-static` and `@ffprobe-installer/ffprobe` are dev fallbacks.
+   - **Quality:** MP4-friendly sources are stream-copied, which is lossless. Conversions (`planEncoding`) start with an ffprobe of the source and keep:
+     - resolution (only odd sizes are rounded to even) and frame timing;
+     - every audio track; AAC/MP3 tracks are copied untouched, and the rest become AAC at no less than the source bitrate (192k stereo / 384k surround minimum);
+     - HEVC sources stay HEVC (libx265 CRF 18, 10-bit kept). Everything else becomes H.264 (libx264 CRF 16, preset `medium`).
+     - Override with `SPLIT_X264_CRF`, `SPLIT_X264_PRESET`, `SPLIT_X265_CRF` and `SPLIT_X265_PRESET`. The chosen settings show in the job log and the split dialog.
 
 ### 11. Scrape All for Title-Only Scenes ✅
 When a scene has a title but no performers and no URLs (scene URL, episode URLs or GEVI URL), **Scrape All** (`POST /api/stash/scenes/:id/scrape-all`) also searches GEVI and AEBN for the title as a movie title (`server/services/sceneTitleMovieSearchService.js`).

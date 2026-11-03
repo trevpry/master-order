@@ -65,6 +65,36 @@ test('sceneMediaUrls derives browser preview URLs from Stash scene paths', () =>
   assert.strictEqual(split.sceneMediaUrls({ stream: null }), null);
 });
 
+test('planEncoding keeps source quality characteristics', () => {
+  const copy = split.planEncoding({ transcode: false, media: { video: { codec: 'hevc' } } });
+  assert.deepStrictEqual([copy.mode, copy.hevc], ['copy', true]);
+
+  const tenBitHevc = split.summarizeSourceMedia({
+    streams: [
+      { codec_type: 'video', codec_name: 'hevc', width: 1920, height: 1080, pix_fmt: 'yuv420p10le' },
+      { codec_type: 'audio', codec_name: 'aac', channels: 2, bit_rate: '256000' },
+      { codec_type: 'audio', codec_name: 'ac3', channels: 6, bit_rate: '448000' }
+    ],
+    format: { bit_rate: '9000000' }
+  });
+  const hevcPlan = split.planEncoding({ transcode: true, media: tenBitHevc, encoders: new Set(['libx264', 'libx265']), env: {} });
+  assert.deepStrictEqual([hevcPlan.video.encoder, hevcPlan.video.pixFmt, hevcPlan.video.tag, hevcPlan.video.evenScale], ['libx265', 'yuv420p10le', 'hvc1', false]);
+  assert.deepStrictEqual(hevcPlan.audio, [{ copy: true, codec: 'aac' }, { copy: false, codec: 'ac3', bitrate: '560k' }]);
+
+  const args = split.buildFfmpegArgs({ input: 'in', output: 'out', start: 0, end: 10, transcode: true, plan: hevcPlan });
+  assert.ok(args.join(' ').includes('-c:a:0 copy -c:a:1 aac -b:a:1 560k'));
+  assert.ok(!args.includes('-vf'));
+
+  const noX265 = split.planEncoding({ transcode: true, media: tenBitHevc, encoders: new Set(['libx264']), env: {} });
+  assert.deepStrictEqual([noX265.video.encoder, noX265.video.pixFmt], ['libx264', 'yuv420p']);
+
+  const wmv = split.summarizeSourceMedia(null, { video_codec: 'wmv3', audio_codec: 'wmav2', width: 641, height: 480 });
+  const wmvPlan = split.planEncoding({ transcode: true, media: wmv, env: {} });
+  assert.deepStrictEqual([wmvPlan.video.encoder, wmvPlan.video.crf, wmvPlan.video.preset, wmvPlan.video.evenScale], ['libx264', '16', 'medium', true]);
+  assert.strictEqual(wmvPlan.audio[0].bitrate, '192k');
+  assert.strictEqual(split.aacBitrate({ channels: 1, bitRate: 32000 }), '128k');
+});
+
 test('mergeScenePerformers keeps GEVI action codes and dedupes names', () => {
   const merged = split.mergeScenePerformers(
     [{ name: 'Billie Ramos' }, { name: 'Diego Starr' }],
@@ -78,12 +108,17 @@ try { ffmpegPath = require('../config/ffmpegConfig').ffmpegPath; } catch { ffmpe
 const ffprobePath = (() => { try { return require('../config/ffmpegConfig').ffprobePath; } catch { return null; } })();
 
 function probe(file) {
-  const out = execFileSync(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name,codec_type', '-of', 'json', file]).toString();
+  const out = execFileSync(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name,codec_type,width,height,bit_rate', '-of', 'json', file]).toString();
   const json = JSON.parse(out);
+  const video = json.streams.find(s => s.codec_type === 'video');
+  const audio = json.streams.find(s => s.codec_type === 'audio');
   return {
     duration: Number(json.format.duration),
-    video: json.streams.find(s => s.codec_type === 'video')?.codec_name,
-    audio: json.streams.find(s => s.codec_type === 'audio')?.codec_name
+    video: video?.codec_name,
+    width: video?.width,
+    height: video?.height,
+    audio: audio?.codec_name,
+    audioBitRate: Number(audio?.bit_rate) || null
   };
 }
 
@@ -131,8 +166,10 @@ async function waitForJob(id) {
 }
 
 for (const variant of [
-  { ext: 'mp4', args: ['-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac'], file: { video_codec: 'h264', audio_codec: 'aac' }, transcode: false },
-  { ext: 'avi', args: ['-c:v', 'mpeg4', '-c:a', 'libmp3lame'], file: { video_codec: 'mpeg4', audio_codec: 'mp3' }, transcode: true }
+  { ext: 'mp4', args: ['-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac'], file: { video_codec: 'h264', audio_codec: 'aac' }, transcode: false, audio: 'aac' },
+  // MP3 audio is copied untouched even though the MPEG-4 ASP video is converted
+  { ext: 'avi', args: ['-c:v', 'mpeg4', '-c:a', 'libmp3lame'], file: { video_codec: 'mpeg4', audio_codec: 'mp3' }, transcode: true, audio: 'mp3' },
+  { ext: 'wmv', args: ['-c:v', 'wmv2', '-c:a', 'wmav2', '-b:a', '64k'], file: { video_codec: 'wmv2', audio_codec: 'wmav2' }, transcode: true, audio: 'aac' }
 ]) {
   test(`split job cuts a ${variant.ext.toUpperCase()} movie into MP4 scenes and applies metadata`, { skip: !ffmpegPath || !ffprobePath, timeout: 120000 }, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'split-test-'));
@@ -149,7 +186,7 @@ for (const variant of [
       const { graphql, calls } = fakeStash(stashPath, file);
       const prisma = fakePrisma();
 
-      const job = await split.startSplitJob({ prisma, graphql, ffmpegPath, pollIntervalMs: 10 }, '7', {
+      const job = await split.startSplitJob({ prisma, graphql, ffmpegPath, ffprobePath, pollIntervalMs: 10 }, '7', {
         sceneId: '55',
         originalAction: 'unlink',
         segments: [
@@ -165,7 +202,10 @@ for (const variant of [
       const outputs = ['Full Movie - Scene 01.mp4', 'Full Movie - Scene 02.mp4'].map(n => path.join(root, 'movies', n));
       const probes = outputs.map(probe);
       assert.strictEqual(probes[0].video, 'h264');
-      assert.strictEqual(probes[0].audio, 'aac');
+      assert.strictEqual(probes[0].audio, variant.audio);
+      assert.deepStrictEqual([probes[0].width, probes[0].height], [320, 240]);
+      if (variant.ext === 'wmv') assert.match(done.encoding, /H\.264 CRF 16 \(medium\); wmav2 → AAC \d{3}k/);
+      if (variant.ext === 'avi') assert.match(done.encoding, /mp3 copied/);
       assert.ok(Math.abs(probes[0].duration - 5) < 1.2, `scene 1 duration ${probes[0].duration}`);
       assert.ok(Math.abs(probes[1].duration - 7) < 1.2, `scene 2 duration ${probes[1].duration}`);
       assert.deepStrictEqual(fs.readdirSync(path.join(root, 'movies')).filter(n => n.endsWith('.part')), []);

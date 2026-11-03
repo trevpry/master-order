@@ -3,8 +3,8 @@
  *
  * Splits a full-movie scene in a Stash group into one file per scene, using the scene lengths listed on the
  * movie's AEBN page, then:
- *   1. cuts each segment with ffmpeg next to the original (stream copy for MP4-friendly sources; AVI/WMV and
- *      other non-MP4 codecs are converted to H.264/AAC MP4),
+ *   1. cuts each segment with ffmpeg next to the original (lossless stream copy for MP4-friendly sources; AVI/WMV
+ *      and other non-MP4 codecs are converted to MP4 at near-source quality — see planEncoding),
  *   2. has Stash scan the new files,
  *   3. applies per-scene metadata from AEBN + GEVI (title, performers, tags, studio, date, details, cover, URLs,
  *      group + scene number) to the new Stash scenes and syncs them locally (incl. GEVI action codes),
@@ -148,21 +148,151 @@ function outputFileName(sourceBasename, number) {
   return `${stem} - Scene ${String(number).padStart(2, '0')}.mp4`;
 }
 
-function buildFfmpegArgs({ input, output, start, end, transcode, hevc = false, preset = process.env.SPLIT_X264_PRESET || 'veryfast', crf = process.env.SPLIT_X264_CRF || '20' }) {
+const toNumber = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+/** Source stream details from ffprobe JSON (falls back to what Stash reports about the file). */
+function summarizeSourceMedia(probeJson, file = {}) {
+  const streams = Array.isArray(probeJson?.streams) ? probeJson.streams : null;
+  if (!streams) {
+    return {
+      probed: false,
+      video: { codec: String(file.video_codec || '').toLowerCase(), width: toNumber(file.width), height: toNumber(file.height), pixFmt: null, bitDepth: null, bitRate: null },
+      audio: file.audio_codec ? [{ codec: String(file.audio_codec).toLowerCase(), bitRate: null, channels: null, sampleRate: null }] : [],
+      bitRate: toNumber(file.bit_rate)
+    };
+  }
+  const video = streams.find(s => s.codec_type === 'video' && !s.disposition?.attached_pic);
+  const pixFmt = video?.pix_fmt || null;
+  const depthFromFormat = pixFmt ? /(\d{2})(?:le|be)$/.exec(pixFmt) : null;
+  return {
+    probed: true,
+    video: video ? {
+      codec: String(video.codec_name || '').toLowerCase(),
+      width: toNumber(video.width),
+      height: toNumber(video.height),
+      pixFmt,
+      bitDepth: toNumber(video.bits_per_raw_sample) || (depthFromFormat ? Number(depthFromFormat[1]) : (pixFmt ? 8 : null)),
+      bitRate: toNumber(video.bit_rate)
+    } : null,
+    audio: streams.filter(s => s.codec_type === 'audio').map(s => ({
+      codec: String(s.codec_name || '').toLowerCase(),
+      bitRate: toNumber(s.bit_rate),
+      channels: toNumber(s.channels),
+      sampleRate: toNumber(s.sample_rate)
+    })),
+    bitRate: toNumber(probeJson?.format?.bit_rate)
+  };
+}
+
+/** AAC bitrate for a re-encoded audio track: at least the source's bitrate (+25% for the lossy→lossy hop). */
+function aacBitrate(track = {}) {
+  const channels = track.channels || 2;
+  const floor = channels <= 1 ? 128000 : channels <= 2 ? 192000 : 384000;
+  const target = Math.max(floor, Math.round((track.bitRate || 0) * 1.25));
+  return `${Math.round(Math.min(target, 640000) / 1000)}k`;
+}
+
+/**
+ * How each cut is encoded. Stream copy is lossless. When a conversion is needed the source's codec family, bit
+ * depth, resolution, frame timing, every audio track and their channel layouts are kept; MP4-compatible audio is
+ * copied untouched and everything else becomes high-bitrate AAC.
+ */
+function planEncoding({ transcode, media = {}, encoders = new Set(), env = process.env } = {}) {
+  const videoCodec = String(media.video?.codec || '').toLowerCase();
+  const isHevc = /hevc|h265/.test(videoCodec);
+  if (!transcode) {
+    return { mode: 'copy', hevc: isHevc, summary: 'Lossless stream copy (no re-encoding)' };
+  }
+
+  const tenBit = (media.video?.bitDepth || 8) > 8;
+  const useX265 = isHevc && encoders.has('libx265');
+  const video = useX265
+    ? { encoder: 'libx265', crf: String(env.SPLIT_X265_CRF || '18'), preset: String(env.SPLIT_X265_PRESET || env.SPLIT_X264_PRESET || 'medium'), pixFmt: tenBit ? 'yuv420p10le' : 'yuv420p', tag: 'hvc1' }
+    : { encoder: 'libx264', crf: String(env.SPLIT_X264_CRF || '16'), preset: String(env.SPLIT_X264_PRESET || 'medium'), pixFmt: 'yuv420p' };
+  const { width, height } = media.video || {};
+  video.evenScale = !width || !height || width % 2 !== 0 || height % 2 !== 0;
+
+  const tracks = Array.isArray(media.audio) ? media.audio : [];
+  const audio = tracks.length > 0
+    ? tracks.map(track => (track.codec && COPY_AUDIO_CODECS.has(track.codec) ? { copy: true, codec: track.codec } : { copy: false, codec: track.codec || null, bitrate: aacBitrate(track) }))
+    : null;
+
+  const audioSummary = !audio
+    ? 'AAC 192k'
+    : audio.map(a => (a.copy ? `${a.codec} copied` : `${a.codec || 'audio'} → AAC ${a.bitrate}`)).join(', ');
+  const videoSummary = `${useX265 ? 'HEVC' : 'H.264'} CRF ${video.crf} (${video.preset})${tenBit && useX265 ? ' 10-bit' : ''}`;
+  return { mode: 'transcode', hevc: useX265, video, audio, summary: `${videoSummary}; ${audioSummary}` };
+}
+
+function buildFfmpegArgs({ input, output, start, end, transcode, hevc = false, plan = null }) {
+  const encoding = plan || planEncoding({ transcode, media: { video: { codec: hevc ? 'hevc' : '' }, audio: [] } });
   const args = ['-hide_banner', '-nostdin', '-y', '-ss', String(start), '-i', input, '-t', String(round(end - start))];
-  if (transcode) {
-    args.push(
-      '-map', '0:v:0', '-map', '0:a:0?',
-      '-c:v', 'libx264', '-preset', String(preset), '-crf', String(crf), '-pix_fmt', 'yuv420p',
-      '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
-      '-c:a', 'aac', '-b:a', '160k'
-    );
+  if (encoding.mode === 'transcode') {
+    const { video, audio } = encoding;
+    args.push('-map', '0:v:0', '-map', '0:a?', '-map_metadata', '0', '-map_chapters', '-1');
+    args.push('-c:v', video.encoder, '-preset', video.preset, '-crf', video.crf, '-pix_fmt', video.pixFmt);
+    if (video.encoder === 'libx265') args.push('-x265-params', 'log-level=error');
+    if (video.tag) args.push('-tag:v', video.tag);
+    if (video.evenScale) args.push('-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos');
+    if (!audio) {
+      args.push('-c:a', 'aac', '-b:a', '192k');
+    } else {
+      audio.forEach((track, index) => {
+        if (track.copy) args.push(`-c:a:${index}`, 'copy');
+        else args.push(`-c:a:${index}`, 'aac', `-b:a:${index}`, track.bitrate);
+      });
+    }
   } else {
-    args.push('-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-avoid_negative_ts', 'make_zero');
-    if (hevc) args.push('-tag:v', 'hvc1');
+    args.push('-map', '0:v:0', '-map', '0:a?', '-map_metadata', '0', '-map_chapters', '-1', '-c', 'copy', '-avoid_negative_ts', 'make_zero');
+    if (encoding.hevc) args.push('-tag:v', 'hvc1');
   }
   args.push('-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', '-f', 'mp4', output);
   return args;
+}
+
+function runCapture(binary, args) {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let child;
+    try {
+      child = spawn(binary, args, { windowsHide: true });
+    } catch {
+      resolve(null);
+      return;
+    }
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', () => {});
+    child.on('error', () => resolve(null));
+    child.on('close', code => resolve(code === 0 ? stdout : null));
+  });
+}
+
+async function probeSourceMedia(ffprobePath, input, file) {
+  if (!ffprobePath) return summarizeSourceMedia(null, file);
+  const out = await runCapture(ffprobePath, ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', input]);
+  try {
+    return summarizeSourceMedia(out ? JSON.parse(out) : null, file);
+  } catch {
+    return summarizeSourceMedia(null, file);
+  }
+}
+
+const encoderCache = new Map();
+async function availableEncoders(ffmpegPath) {
+  if (!encoderCache.has(ffmpegPath)) {
+    encoderCache.set(ffmpegPath, runCapture(ffmpegPath, ['-hide_banner', '-encoders']).then(out => {
+      const names = new Set();
+      String(out || '').split(/\r?\n/).forEach(line => {
+        const m = line.match(/^\s*[VAS][\w.]{5}\s+(\S+)/);
+        if (m) names.add(m[1]);
+      });
+      return names;
+    }));
+  }
+  return encoderCache.get(ffmpegPath);
 }
 
 const isGenericSceneTitle = (title) => !title || /^scene\s*\d+$/i.test(String(title).trim());
@@ -194,7 +324,7 @@ const SCENE_QUERY = `query SplitScene($id: ID!) {
     performers { id name }
     tags { id name }
     groups { group { id } scene_index }
-    files { id path basename duration video_codec audio_codec format size width height }
+    files { id path basename duration video_codec audio_codec format size width height bit_rate }
     paths { stream vtt sprite screenshot }
   }
 }`;
@@ -594,6 +724,14 @@ async function executeSplitJob(deps, job) {
     try { sourceStat = await fsImpl.promises.stat(localSource); } catch { /* ownership copy is best effort */ }
     const dir = path.dirname(localSource);
 
+    const [media, encoders] = await Promise.all([
+      probeSourceMedia(deps.ffprobePath, localSource, file),
+      job.transcode ? availableEncoders(ffmpegPath) : Promise.resolve(new Set())
+    ]);
+    const plan = planEncoding({ transcode: job.transcode, media, encoders });
+    job.encoding = plan.summary;
+    log(job, `Encoding: ${plan.summary}${media.probed ? '' : ' (source not probed; using Stash file info)'}`);
+
     for (const seg of job.segments) {
       if (job.cancelRequested) throw new Error('Cancelled');
       job.step = `${job.transcode ? 'Converting' : 'Cutting'} scene ${seg.number}`;
@@ -609,7 +747,7 @@ async function executeSplitJob(deps, job) {
         start: seg.start,
         end: seg.end,
         transcode: job.transcode,
-        hevc: /hevc|h265/i.test(file.video_codec || '')
+        plan
       }), {
         job,
         onProgress: seconds => {
@@ -1036,6 +1174,9 @@ module.exports = {
   validateSegments,
   outputFileName,
   buildFfmpegArgs,
+  summarizeSourceMedia,
+  planEncoding,
+  aacBitrate,
   mergeScenePerformers,
   buildSplitPlan,
   manualSegments,

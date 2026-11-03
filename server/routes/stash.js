@@ -4434,6 +4434,7 @@ const splitDeps = async () => ({
   actionCodeService,
   blackFrameStore: splitBlackFrameStore,
   ffmpegPath: require('../config/ffmpegConfig').ffmpegPath || 'ffmpeg',
+  ffprobePath: require('../config/ffmpegConfig').ffprobePath || 'ffprobe',
   scrapeAebn: async (url) => {
     const registry = await getScraperRegistry();
     const aebn = registry.getAllScrapers().find(s => s.siteName === 'AEBN') || new (require('../services/scrapers/AebnScraper'))();

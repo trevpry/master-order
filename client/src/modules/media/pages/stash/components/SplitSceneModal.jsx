@@ -262,7 +262,7 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
               <span>{job.step}</span>
             </div>
             <div className="ssm-progress"><div style={{ width: `${Math.round(job.progress || 0)}%` }} /></div>
-            {job.transcodeReason && <p className="ssm-note">🔄 {job.transcodeReason} — scenes are converted to MP4 (H.264/AAC).</p>}
+            {job.transcodeReason && <p className="ssm-note">🔄 {job.transcodeReason} — scenes are converted to MP4{job.encoding ? ` (${job.encoding})` : ''}.</p>}
             {job.error && <p className="ssm-error">{job.error}</p>}
             <table className="ssm-table">
               <thead><tr><th>#</th><th>Time</th><th>Title</th><th>Status</th></tr></thead>
@@ -326,11 +326,11 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                   </div>
                 </div>
                 {plan.transcodeReason
-                  ? <p className="ssm-note">🔄 {plan.transcodeReason} — each scene will be converted to MP4 (H.264/AAC). This takes a while.</p>
+                  ? <p className="ssm-note">🔄 {plan.transcodeReason} — each scene will be converted to MP4 at near-source quality (same resolution, frame rate and audio tracks; MP4-compatible audio is copied untouched). This takes a while.</p>
                   : (
                     <label className="ssm-check">
                       <input type="checkbox" checked={forceTranscode} onChange={(e) => setForceTranscode(e.target.checked)} />
-                      Re-encode for frame-accurate cuts (slower; otherwise cuts snap to the nearest keyframe without quality loss)
+                      Re-encode for frame-accurate cuts (slower, high-quality re-encode in the source's codec; otherwise cuts snap to the nearest keyframe with no quality loss)
                     </label>
                   )}
                 {!plan.ffmpegAvailable && <p className="ssm-error">ffmpeg is not available on the server.</p>}
