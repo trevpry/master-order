@@ -211,3 +211,170 @@ test('a failed cut removes the files the job wrote and leaves Stash untouched', 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('blackScanRanges merges overlapping windows and clamps to the file', () => {
+  assert.deepStrictEqual(split.blackScanRanges([100, 150, 400, 'x'], 30, 420), [[70, 180], [370, 420]]);
+  assert.deepStrictEqual(split.blackScanRanges([10], 30, 0), [[0, 40]]);
+  assert.deepStrictEqual(split.blackScanRanges(null, 30, 100), []);
+});
+
+test('parseBlackdetect offsets ffmpeg times and closes a trailing black run', () => {
+  const stderr = [
+    '[blackdetect @ 0x1] black_start:2.5 black_end:4 black_duration:1.5',
+    'frame=  10 fps=0.0',
+    '[blackdetect @ 0x1] black_start:58.2'
+  ].join('\n');
+  assert.deepStrictEqual(split.parseBlackdetect(stderr, 100, 160), [{ start: 102.5, end: 104 }, { start: 158.2, end: 160 }]);
+  assert.deepStrictEqual(
+    split.mergeBlackIntervals([{ start: 10, end: 12 }, { start: 1, end: 2 }, { start: 12.1, end: 13 }]),
+    [{ start: 1, end: 2, duration: 1 }, { start: 10, end: 13, duration: 3 }]
+  );
+});
+
+test('ffmpeg blackdetect finds the black gap between scenes', { skip: !ffmpegPath, timeout: 60000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'blackdetect-'));
+  try {
+    const input = path.join(dir, 'gap.mp4');
+    execFileSync(ffmpegPath, [
+      '-v', 'error', '-y',
+      '-filter_complex', 'testsrc=s=320x240:r=25:d=4[a];color=c=black:s=320x240:r=25:d=1.5[b];testsrc=s=320x240:r=25:d=3[c];[a][b][c]concat=n=3:v=1:a=0[v]',
+      '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input
+    ]);
+    const { spawnSync } = require('child_process');
+    const result = spawnSync(ffmpegPath, split.buildBlackdetectArgs(input, 2, 6), { encoding: 'utf8' });
+    const intervals = split.parseBlackdetect(result.stderr, 2, 8);
+    assert.strictEqual(intervals.length, 1, result.stderr.slice(-500));
+    assert.ok(Math.abs(intervals[0].start - 4) < 0.25, `start ${intervals[0].start}`);
+    assert.ok(Math.abs(intervals[0].end - 5.5) < 0.25, `end ${intervals[0].end}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('startBlackScan scans around cuts in the background and reports black runs', { skip: !ffmpegPath, timeout: 60000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'blackscan-'));
+  const previousMap = process.env.STASH_PATH_MAP;
+  try {
+    const input = path.join(dir, 'movie.mp4');
+    execFileSync(ffmpegPath, [
+      '-v', 'error', '-y',
+      '-filter_complex', 'testsrc=s=320x240:r=25:d=6[a];color=c=black:s=320x240:r=25:d=1[b];testsrc=s=320x240:r=25:d=5[c];[a][b][c]concat=n=3:v=1:a=0[v]',
+      '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', input
+    ]);
+    process.env.STASH_PATH_MAP = `/stash=${dir}`;
+    const graphql = async (query) => {
+      const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+      if (op === 'SplitGroup') return { findGroup: { id: '7', name: 'Movie', urls: [] } };
+      if (op === 'SplitScene') return { findScene: { id: '55', title: 'Full', groups: [{ group: { id: '7' } }], files: [{ id: 'f', path: '/stash/movie.mp4', basename: 'movie.mp4', duration: 12 }] } };
+      throw new Error(`unexpected ${op}`);
+    };
+    const started = await split.startBlackScan({ graphql, ffmpegPath }, '7', { sceneId: '55', cuts: [6], window: 2 });
+    assert.strictEqual(started.window, 5, 'window is clamped to at least 5s');
+    assert.deepStrictEqual(started.ranges, [[1, 11]]);
+    let scan = started;
+    for (let i = 0; i < 450 && scan.status === 'running'; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      scan = split.getBlackScan(started.id);
+    }
+    assert.strictEqual(scan.status, 'completed', scan.error || '');
+    assert.strictEqual(scan.intervals.length, 1);
+    assert.ok(Math.abs(scan.intervals[0].start - 6) < 0.25 && Math.abs(scan.intervals[0].end - 7) < 0.25, JSON.stringify(scan.intervals));
+    await assert.rejects(split.startBlackScan({ graphql, ffmpegPath }, '7', { sceneId: '55', cuts: [] }), /Nothing to scan/);
+  } finally {
+    if (previousMap === undefined) delete process.env.STASH_PATH_MAP; else process.env.STASH_PATH_MAP = previousMap;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('BlackFrameStore merges partial scans, persists to disk and drops results for a replaced file', async () => {
+  const { BlackFrameStore, mergeRecord } = require('../services/stashBlackFrameStore');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'blackstore-'));
+  try {
+    const file = { path: '/data/a.mp4', size: 100, duration: 600 };
+    const store = new BlackFrameStore(path.join(dir, 'nested', 'black.json'));
+    await store.save('5', file, { ranges: [[0, 100]], intervals: [{ start: 50, end: 51 }] });
+    let record = await store.save('5', file, { ranges: [[90, 600]], intervals: [{ start: 300, end: 302 }] });
+    assert.deepStrictEqual(record.ranges, [[0, 600]]);
+    assert.strictEqual(record.fullScan, true);
+    assert.deepStrictEqual(record.intervals.map(i => [i.start, i.end]), [[50, 51], [300, 302]]);
+
+    const reloaded = new BlackFrameStore(path.join(dir, 'nested', 'black.json'));
+    assert.strictEqual((await reloaded.get('5', file)).intervals.length, 2);
+    assert.strictEqual(await reloaded.get('5', { ...file, size: 999 }), null, 'a different file invalidates the record');
+    assert.deepStrictEqual(Object.keys(await reloaded.getMany(['5', '6'])), ['5']);
+
+    // A rescan of a range replaces the old intervals inside it
+    const merged = mergeRecord({ ranges: [[0, 100]], intervals: [{ start: 10, end: 11 }, { start: 80, end: 81 }] }, { ranges: [[50, 100]], intervals: [], duration: 100 });
+    assert.deepStrictEqual(merged.intervals.map(i => i.start), [10]);
+    assert.strictEqual(merged.fullScan, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('manualSegments covers the whole clip and keeps its performers and tags', () => {
+  const [seg] = split.manualSegments(
+    { name: 'Movie', date: '2020-01-01' },
+    { details: 'd', performers: [{ id: 1, name: 'A' }], tags: [{ id: 2, name: 'T' }] },
+    { duration: 125.5 }
+  );
+  assert.deepStrictEqual([seg.number, seg.start, seg.end, seg.title, seg.date], [1, 0, 125.5, 'Movie - Scene 1', '2020-01-01']);
+  assert.deepStrictEqual(seg.performers, [{ id: '1', name: 'A', scrapedName: 'A', actionCode: null }]);
+  assert.deepStrictEqual(seg.tags, [{ id: '2', name: 'T' }]);
+});
+
+test('clips in a group are scanned one at a time and full-scan results are stored per clip', { skip: !ffmpegPath, timeout: 90000 }, async () => {
+  const { BlackFrameStore } = require('../services/stashBlackFrameStore');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'groupblack-'));
+  const previousMap = process.env.STASH_PATH_MAP;
+  try {
+    for (const name of ['one.mp4', 'two.mp4']) {
+      execFileSync(ffmpegPath, [
+        '-v', 'error', '-y',
+        '-filter_complex', 'testsrc=s=160x120:r=25:d=3[a];color=c=black:s=160x120:r=25:d=1[b];testsrc=s=160x120:r=25:d=2[c];[a][b][c]concat=n=3:v=1:a=0[v]',
+        '-map', '[v]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(dir, name)
+      ]);
+    }
+    process.env.STASH_PATH_MAP = `/stash=${dir}`;
+    const names = { 1: 'one.mp4', 2: 'two.mp4' };
+    const graphql = async (query, variables) => {
+      const op = query.match(/(?:query|mutation)\s+(\w+)/)[1];
+      if (op === 'SplitGroup') return { findGroup: { id: '9', name: 'Movie', urls: [] } };
+      if (op === 'SplitScene') {
+        const name = names[variables.id];
+        return { findScene: { id: variables.id, title: name, groups: [{ group: { id: '9' } }], files: [{ path: `/stash/${name}`, basename: name, duration: 6, size: 1 }] } };
+      }
+      throw new Error(`unexpected ${op}`);
+    };
+    const blackFrameStore = new BlackFrameStore(path.join(dir, 'black.json'));
+    const deps = { graphql, ffmpegPath, blackFrameStore };
+    const finish = async (id) => {
+      let scan = split.getBlackScan(id);
+      for (let i = 0; i < 600 && (scan.status === 'running' || (scan.status === 'completed' && !scan.stored)); i++) {
+        await new Promise(r => setTimeout(r, 100));
+        scan = split.getBlackScan(id);
+      }
+      return scan;
+    };
+
+    const first = await split.startBlackScan(deps, '9', { sceneId: '1', fullScan: true });
+    assert.strictEqual((await split.getGroupBlackFrames(deps, '9', [])).activeScan.sceneId, '1');
+    await assert.rejects(split.startBlackScan(deps, '9', { sceneId: '2', fullScan: true }), (e) => e.code === 'SCAN_BUSY' && e.status === 409);
+    assert.strictEqual((await finish(first.id)).status, 'completed');
+
+    let state = await split.getGroupBlackFrames(deps, '9', ['1', '2']);
+    assert.strictEqual(state.activeScan, null);
+    assert.deepStrictEqual(Object.keys(state.results), ['1']);
+    assert.strictEqual(state.results['1'].fullScan, true);
+    assert.strictEqual(state.results['1'].blackRuns, 1);
+
+    const second = await split.startBlackScan(deps, '9', { sceneId: '2', fullScan: true });
+    assert.strictEqual((await finish(second.id)).status, 'completed');
+    state = await split.getGroupBlackFrames(deps, '9', ['1', '2']);
+    assert.deepStrictEqual(Object.keys(state.results).sort(), ['1', '2']);
+    await blackFrameStore.writeChain;
+  } finally {
+    if (previousMap === undefined) delete process.env.STASH_PATH_MAP; else process.env.STASH_PATH_MAP = previousMap;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

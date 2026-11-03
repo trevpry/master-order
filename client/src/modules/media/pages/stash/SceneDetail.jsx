@@ -1764,7 +1764,11 @@ export default function SceneDetail() {
   const handleScrapeAll = async () => {
     try {
       setIsScraping(true);
-      setScrapeAllStatus('Contacting stash-box sources…');
+      const hasPerformers = (data?.performers || []).length > 0;
+      const hasUrls = Boolean(data?.url) || Boolean(data?.geviUrl) || (Array.isArray(data?.episodeUrls) && data.episodeUrls.length > 0);
+      setScrapeAllStatus(!hasPerformers && !hasUrls && data?.title
+        ? `Searching GEVI and AEBN for “${data.title}” as a movie…`
+        : 'Contacting stash-box sources…');
 
       const response = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}/scrape-all`, {
         method: 'POST',

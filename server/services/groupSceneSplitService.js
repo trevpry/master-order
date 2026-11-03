@@ -191,6 +191,8 @@ const SCENE_QUERY = `query SplitScene($id: ID!) {
   findScene(id: $id) {
     id title date details
     studio { id name }
+    performers { id name }
+    tags { id name }
     groups { group { id } scene_index }
     files { id path basename duration video_codec audio_codec format size width height }
     paths { stream vtt sprite screenshot }
@@ -305,15 +307,20 @@ async function buildSplitPlan(deps, { groupId, sceneId, aebnUrl: aebnOverride, g
   }
 
   if (!aebnUrl) {
-    throw new SplitError('No AEBN URL found for this group. Scrape the group from AEBN first or enter the AEBN movie URL.', 400, 'NO_AEBN_URL');
+    warnings.push('No AEBN URL found for this group, so there are no scene lengths to start from. Insert cut lines yourself (black-frame scans help), or enter the AEBN movie URL and click Rebuild.');
+    return finishPlan(deps, { group, scene, file, aebnUrl: null, geviUrl, warnings, mode: 'manual', segments: manualSegments(group, scene, file) });
   }
 
   const aebnResult = await scrapeAebn(aebnUrl);
   const aebn = aebnResult?.success ? aebnResult.scraped : null;
-  if (!aebn) throw new SplitError(`AEBN scrape failed: ${aebnResult?.error || 'no data'}`, 502, 'AEBN_FAILED');
+  if (!aebn) {
+    warnings.push(`AEBN scrape failed (${aebnResult?.error || 'no data'}). Insert cut lines yourself or try Rebuild.`);
+    return finishPlan(deps, { group, scene, file, aebnUrl, geviUrl, warnings, mode: 'manual', segments: manualSegments(group, scene, file) });
+  }
   const aebnScenes = (aebn.allScenes || []).filter(s => s.durationSeconds > 0);
   if (aebnScenes.length < 2) {
-    throw new SplitError('AEBN did not list scene lengths for at least two scenes, so the movie cannot be split.', 400, 'NO_SCENE_LENGTHS');
+    warnings.push('AEBN does not list scene lengths for this movie. Insert cut lines yourself (black-frame scans help).');
+    return finishPlan(deps, { group, scene, file, aebnUrl, geviUrl, warnings, mode: 'manual', segments: manualSegments(group, scene, file) });
   }
   if (aebnScenes.length < (aebn.allScenes || []).length) {
     warnings.push(`${aebn.allScenes.length - aebnScenes.length} AEBN scene(s) have no length and were left out.`);
@@ -381,15 +388,49 @@ async function buildSplitPlan(deps, { groupId, sceneId, aebnUrl: aebnOverride, g
     };
   });
 
+  return finishPlan(deps, { group, scene, file, aebnUrl, geviUrl, warnings, mode: 'aebn', segments: planSegments, studio });
+}
+
+/** One segment covering the whole file, carrying the clip's own performers/tags, for clips without AEBN scene lengths. */
+function manualSegments(group, scene, file) {
+  return [{
+    number: 1,
+    start: 0,
+    end: round(Number(file.duration) || 0),
+    listedDuration: null,
+    title: `${group.name} - Scene 1`,
+    quality: null,
+    details: scene.details || null,
+    date: group.date || scene.date || null,
+    image: null,
+    urls: [],
+    performers: (scene.performers || []).map(p => ({ id: String(p.id), name: p.name, scrapedName: p.name, actionCode: null })),
+    unmatchedPerformers: [],
+    tags: (scene.tags || []).map(t => ({ id: String(t.id), name: t.name })),
+    unmatchedTags: []
+  }];
+}
+
+async function finishPlan(deps, { group, scene, file, aebnUrl, geviUrl, warnings, mode, segments, studio = null }) {
   const localPath = stashPathToLocal(file.path);
+  let blackFrames = null;
+  if (deps.blackFrameStore) {
+    try {
+      const record = await deps.blackFrameStore.get(String(scene.id), file);
+      if (record) blackFrames = { intervals: record.intervals, ranges: record.ranges, fullScan: record.fullScan, scannedAt: record.scannedAt };
+    } catch {
+      blackFrames = null;
+    }
+  }
   return {
     group: { id: String(group.id), name: group.name },
+    mode,
     source: {
       id: String(scene.id),
       title: scene.title,
       path: file.path,
       basename: file.basename,
-      duration: fileDuration,
+      duration: Number(file.duration) || 0,
       size: file.size,
       format: file.format,
       videoCodec: file.video_codec,
@@ -400,12 +441,13 @@ async function buildSplitPlan(deps, { groupId, sceneId, aebnUrl: aebnOverride, g
     },
     aebnUrl,
     geviUrl,
-    studio,
+    studio: studio || group.studio || scene.studio || null,
     transcodeReason: transcodeReason(file),
     ffmpegAvailable: Boolean(deps.ffmpegPath),
     fileAccess: await checkFileAccess(localPath, deps.fs || fs),
+    blackFrames,
     warnings,
-    segments: planSegments
+    segments
   };
 }
 
@@ -719,6 +761,252 @@ function getJob(jobId) {
   return publicJob(jobs.get(jobId));
 }
 
+// ---------------------------------------------------------------------------
+// Black-frame detection (cut suggestions)
+// ---------------------------------------------------------------------------
+
+const BLACK_SCAN_DEFAULT_WINDOW = 90;
+const BLACK_SCAN_MAX_WINDOW = 600;
+const blackScans = new Map();
+
+/** Merge ±window ranges around each cut into sorted, non-overlapping [start, end] scan ranges. */
+function blackScanRanges(cuts, window, duration) {
+  const max = Number(duration) > 0 ? Number(duration) : Infinity;
+  const ranges = (Array.isArray(cuts) ? cuts : [])
+    .map(Number)
+    .filter(Number.isFinite)
+    .map(t => [Math.max(0, t - window), Math.min(max, t + window)])
+    .filter(([a, b]) => b > a)
+    .sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const range of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+  return merged;
+}
+
+/** Parse ffmpeg blackdetect stderr; times are relative to the scanned range, so `offset` is added. */
+function parseBlackdetect(stderr, offset = 0, rangeEnd = null) {
+  const intervals = [];
+  const re = /black_start:\s*([\d.]+)(?:\s+black_end:\s*([\d.]+))?/g;
+  let m;
+  while ((m = re.exec(String(stderr || ''))) !== null) {
+    const start = Number(m[1]) + offset;
+    let end = m[2] !== undefined ? Number(m[2]) + offset : rangeEnd;
+    if (!Number.isFinite(end) || end === null) continue;
+    if (rangeEnd !== null) end = Math.min(end, rangeEnd);
+    if (end > start) intervals.push({ start: round(start), end: round(end) });
+  }
+  return intervals;
+}
+
+/** Combine intervals from adjacent ranges that touch or overlap. */
+function mergeBlackIntervals(intervals) {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  const merged = [];
+  for (const iv of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && iv.start <= last.end + 0.15) last.end = Math.max(last.end, iv.end);
+    else merged.push({ ...iv });
+  }
+  return merged.map(iv => ({ ...iv, duration: round(iv.end - iv.start) }));
+}
+
+function buildBlackdetectArgs(input, start, length) {
+  return [
+    '-hide_banner', '-nostats', '-v', 'info',
+    '-ss', String(start), '-t', String(length),
+    '-i', input,
+    '-map', '0:v:0', '-an', '-sn', '-dn',
+    '-vf', 'fps=10,scale=240:-2,blackdetect=d=0.2:pix_th=0.10:pic_th=0.98',
+    '-progress', 'pipe:1',
+    '-f', 'null', '-'
+  ];
+}
+
+function runFfmpegCapture(ffmpegPath, args, { onProgress, holder } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(ffmpegPath, args, { windowsHide: true });
+    if (holder) holder.child = child;
+    let stderr = '';
+    let buffer = '';
+    child.stdout.on('data', chunk => {
+      buffer += chunk.toString();
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop();
+      for (const line of lines) {
+        const m = line.match(/^out_time_(?:us|ms)=(\d+)/);
+        if (m && onProgress) onProgress(Number(m[1]) / 1e6);
+      }
+    });
+    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', code => {
+      if (holder) holder.child = null;
+      if (code === 0) resolve(stderr);
+      else reject(new Error(holder?.cancelled ? 'Cancelled' : `ffmpeg exited with code ${code}: ${stderr.trim().split(/\r?\n/).slice(-2).join(' | ')}`));
+    });
+  });
+}
+
+function publicBlackScan(scan) {
+  if (!scan) return null;
+  const { child, cancelled, ...rest } = scan;
+  return rest;
+}
+
+function registerBlackScan({ groupId, sceneId, fullScan, window, ranges }) {
+  // One scan per scene: a new scan replaces the running one
+  for (const existing of blackScans.values()) {
+    if (existing.sceneId === sceneId && existing.status === 'running') {
+      existing.cancelled = true;
+      existing.child?.kill('SIGKILL');
+      existing.status = 'cancelled';
+    }
+  }
+  const scan = {
+    id: crypto.randomUUID(),
+    groupId: String(groupId),
+    sceneId,
+    fullScan,
+    window,
+    ranges,
+    status: 'running',
+    progress: 0,
+    intervals: [],
+    error: null,
+    createdAt: new Date().toISOString(),
+    finishedAt: null
+  };
+  blackScans.set(scan.id, scan);
+  const finished = [...blackScans.values()].filter(s => s.status !== 'running');
+  while (blackScans.size > 50 && finished.length) blackScans.delete(finished.shift().id);
+  return scan;
+}
+
+/**
+ * Run blackdetect over the scan's ranges. Fully scanned ranges are saved to deps.blackFrameStore, also when
+ * the scan is cancelled or fails part-way. Resolves once the scan has finished.
+ */
+async function runBlackScan(deps, scan, { localSource, file }) {
+  const { ranges, sceneId } = scan;
+  const totalLength = ranges.reduce((sum, [a, b]) => sum + (b - a), 0) || 1;
+  const found = [];
+  const completedRanges = [];
+  let done = 0;
+  try {
+    for (const [start, end] of ranges) {
+      if (scan.cancelled) break;
+      const length = end - start;
+      const stderr = await runFfmpegCapture(deps.ffmpegPath, buildBlackdetectArgs(localSource, start, length), {
+        holder: scan,
+        onProgress: (t) => { scan.progress = Math.min(0.99, (done + Math.min(t, length)) / totalLength); }
+      });
+      found.push(...parseBlackdetect(stderr, start, end));
+      completedRanges.push([start, end]);
+      done += length;
+      scan.intervals = mergeBlackIntervals(found);
+      scan.progress = Math.min(0.99, done / totalLength);
+    }
+    if (!scan.cancelled) {
+      scan.status = 'completed';
+      scan.progress = 1;
+      console.log(`⬛ Black-frame scan of scene ${sceneId}: ${scan.intervals.length} black interval(s) in ${ranges.length} range(s)`);
+    }
+  } catch (error) {
+    if (!scan.cancelled) {
+      scan.status = 'failed';
+      scan.error = error.message;
+      console.warn(`⬛ Black-frame scan of scene ${sceneId} failed: ${error.message}`);
+    }
+  } finally {
+    scan.finishedAt = new Date().toISOString();
+  }
+  if (deps.blackFrameStore && completedRanges.length > 0) {
+    try {
+      const record = await deps.blackFrameStore.save(sceneId, file, { ranges: completedRanges, intervals: found });
+      scan.stored = { blackRuns: record.intervals.length, fullScan: record.fullScan };
+    } catch (error) {
+      console.warn(`⬛ Could not store black-frame results for scene ${sceneId}: ${error.message}`);
+    }
+  }
+  return scan;
+}
+
+/**
+ * Start a background blackdetect scan of the source file, either around the given cut times (±window seconds)
+ * or across the whole file. Poll getBlackScan for { status, progress, intervals }.
+ */
+async function startBlackScan(deps, groupId, body) {
+  const { graphql } = deps;
+  if (!graphql) throw new SplitError('Stash is not configured', 503);
+  if (!deps.ffmpegPath) throw new SplitError('ffmpeg is not installed on the server', 503);
+  const sceneId = String(body?.sceneId || '');
+  if (!sceneId) throw new SplitError('sceneId is required');
+
+  // Only one clip of a group is scanned at a time (rescanning the same clip replaces its scan)
+  const active = activeGroupBlackScan(groupId);
+  if (active && active.sceneId !== sceneId) {
+    throw new SplitError('Another clip in this group is being scanned for black frames; wait for it to finish or cancel it first', 409, 'SCAN_BUSY');
+  }
+
+  const { file } = await loadStashGroupAndScene(graphql, String(groupId), sceneId);
+  const duration = Number(file.duration) || 0;
+  const localSource = stashPathToLocal(file.path);
+  const access = await checkFileAccess(localSource, deps.fs || fs);
+  if (!access.readable) throw new SplitError(access.error, 400, 'NO_FILE_ACCESS');
+
+  const window = Math.min(Math.max(Number(body?.window) || BLACK_SCAN_DEFAULT_WINDOW, 5), BLACK_SCAN_MAX_WINDOW);
+  const fullScan = Boolean(body?.fullScan);
+  const ranges = fullScan ? [[0, duration]] : blackScanRanges(body?.cuts, window, duration);
+  if (ranges.length === 0 || !(duration > 0)) throw new SplitError('Nothing to scan');
+
+  const scan = registerBlackScan({ groupId, sceneId, fullScan, window, ranges });
+  runBlackScan(deps, scan, { localSource, file });
+  return publicBlackScan(scan);
+}
+
+function getBlackScan(scanId) {
+  return publicBlackScan(blackScans.get(scanId));
+}
+
+function cancelBlackScan(scanId) {
+  const scan = blackScans.get(scanId);
+  if (!scan) throw new SplitError('Scan not found', 404);
+  if (scan.status === 'running') {
+    scan.cancelled = true;
+    scan.status = 'cancelled';
+    scan.child?.kill('SIGKILL');
+  }
+  return publicBlackScan(scan);
+}
+
+// ---------------------------------------------------------------------------
+// Group clip list: stored black-frame results per clip, scanned one clip at a time
+// ---------------------------------------------------------------------------
+
+function activeGroupBlackScan(groupId) {
+  return [...blackScans.values()].find(s => s.groupId === String(groupId) && s.status === 'running') || null;
+}
+
+/** The group's running scan (if any) plus a summary of the stored results for the given scenes. */
+async function getGroupBlackFrames(deps, groupId, sceneIds = []) {
+  const records = deps.blackFrameStore ? await deps.blackFrameStore.getMany(sceneIds) : {};
+  const results = {};
+  for (const [id, record] of Object.entries(records)) {
+    results[id] = {
+      blackRuns: record.intervals.length,
+      fullScan: record.fullScan,
+      scannedSeconds: round(record.ranges.reduce((sum, [a, b]) => sum + (b - a), 0)),
+      duration: record.duration,
+      scannedAt: record.scannedAt
+    };
+  }
+  return { activeScan: publicBlackScan(activeGroupBlackScan(groupId)), results };
+}
+
 function listJobs(groupId = null) {
   return [...jobs.values()]
     .filter(j => !groupId || j.groupId === String(groupId))
@@ -750,10 +1038,19 @@ module.exports = {
   buildFfmpegArgs,
   mergeScenePerformers,
   buildSplitPlan,
+  manualSegments,
   startSplitJob,
   executeSplitJob,
   runFfmpeg,
   getJob,
   listJobs,
-  cancelJob
+  cancelJob,
+  blackScanRanges,
+  parseBlackdetect,
+  mergeBlackIntervals,
+  buildBlackdetectArgs,
+  startBlackScan,
+  getBlackScan,
+  cancelBlackScan,
+  getGroupBlackFrames
 };

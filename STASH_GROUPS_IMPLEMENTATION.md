@@ -179,8 +179,9 @@ Stash groups have no performer field, so links live in the local `StashGroupPerf
 On GroupDetail each scene card has **✂️ Split into Scenes**. It turns a full-movie file into one Stash scene per AEBN scene, using the scene lengths the AEBN scraper reads. Logic is in `server/services/groupSceneSplitService.js`; the UI is `components/SplitSceneModal.jsx`.
 
 1. **Preview:** `POST /api/stash/groups/:id/split/preview {sceneId, aebnUrl?, geviUrl?, offset?}`
-   - Finds the AEBN URL from the override, the Stash group URLs, the local `url`/`geviUrl`, or the GEVI page's external links. Without one it returns `code: NO_AEBN_URL`.
-   - Requires at least two AEBN scenes with lengths (`NO_SCENE_LENGTHS`).
+   - Finds the AEBN URL from the override, the Stash group URLs, the local `url`/`geviUrl`, or the GEVI page's external links.
+   - Returns `mode: 'aebn'` when AEBN lists at least two scenes with lengths. Without an AEBN URL, a failed scrape or no scene lengths it returns `mode: 'manual'`: one scene covering the whole clip (the clip's own performers/tags) plus a warning, and you insert the cuts yourself.
+   - `blackFrames` holds the clip's stored black-frame results (`{intervals, ranges, fullScan, scannedAt}` or null).
    - Builds cut points back to back from `offset`. Leftover time of up to 180s (credits) is folded into the last scene; larger gaps produce a warning.
    - Per scene it merges AEBN performers/tags with GEVI scene performers (action codes), details and episode URL, then matches them to the library.
    - The modal lets you edit start/end times, titles, performers and tags, and skip scenes.
@@ -190,6 +191,20 @@ On GroupDetail each scene card has **✂️ Split into Scenes**. It turns a full
      - Drag a yellow cut handle to move it; dragging seeks the video. A shared boundary moves the end of one scene and the start of the next together.
      - With a cut selected you can nudge it (±0.1/1/5s, or ←/→, Shift = 5s, Alt = 0.1s), set it to the current video time, preview it from 5s before, or step to the previous/next cut.
      - Zoom goes up to 10×. Edits write back into the table's start/end fields to 0.1s precision.
+     - **Insert / remove cut lines** (`components/splitSegmentEdits.js`): "Insert cut at <playhead>" (or `C`), double-clicking the timeline, or Shift+clicking a black-frame chip splits the scene under that time (≥1s from its edges). The new scene copies the performers/tags/URLs of the one it came from.
+       - Selecting a shared cut shows "Remove this cut" (or `Delete`), which merges the two scenes and their performers/tags.
+       - "Insert cuts at black frames" adds a cut in the middle of every black run that is at least the chosen minimum scene length (30s–5min) from existing cuts.
+       - Scenes are renumbered in time order after every insert/remove; generated "<group> - Scene N" titles follow the new numbers. A clip that is still one whole-file scene can't be split.
+     - **Black-frame suggestions:** `POST /api/stash/groups/:id/split/black-frames {sceneId, cuts?, window?, fullScan?}` starts a background ffmpeg `blackdetect` scan (`fps=10,scale=240:-2,blackdetect=d=0.2:pix_th=0.10:pic_th=0.98`).
+       - It scans ±`window` seconds (5–600, default 90) around the current cuts, merged into ranges, or the whole file when `fullScan` is set.
+       - Poll with `GET /api/stash/group-split-black-scans/:scanId` (`{status, progress, ranges, intervals[{start,end,duration}]}`) and cancel with `POST …/:scanId/cancel`. A new scan of the same scene replaces the running one.
+       - The UI shades black runs on the track and on a clickable lane below it; clicking one snaps the selected cut there. Each cut gets a dashed cyan marker at the middle of its nearest black run within the window.
+       - "Snap" (or `S`) moves the selected cut, and "Snap all cuts" applies every suggestion that doesn't cross a neighbor. An end/start pair around a gap may both land on the same black run, which joins the two scenes at one cut.
+       - Results of fully scanned ranges are stored per clip (also when a scan is cancelled) in `<DATA_PATH or /app/data or ./data>/stash-black-frames.json` (`server/services/stashBlackFrameStore.js`, keyed by scene id and invalidated when the file path/size changes). The editor opens with them, and a new scan adds to them.
+       - Only one clip per group is scanned at a time; starting a scan of another clip while one runs returns 409 `SCAN_BUSY`.
+       - Scanning needs the server to read the file, so it only works where the Stash library is mounted (production).
+   - **Group clip list:** above the scene grid, "⬛ Black frames" lists every clip with its stored results (`GET /api/stash/groups/:id/black-frames?sceneIds=1,2` → `{activeScan, results{[id]: {blackRuns, fullScan, scannedSeconds, duration, scannedAt}}}`).
+     - Each clip has a **Scan** button (a whole-file scan through the endpoint above) and **Edit cuts**, which opens its split editor. One clip is scanned at a time, and a running scan is picked up again after a reload.
 2. **Job:** `POST /api/stash/groups/:id/split {sceneId, segments, studioId?, originalAction: unlink|keep|delete, forceTranscode?}` queues an in-memory job; jobs run one at a time.
    - **Cut:** ffmpeg writes `"<file> - Scene NN.mp4"` next to the source.
      - MP4/MOV/MKV with H.264/HEVC + AAC/MP3 is stream-copied (fast and lossless, but cuts snap to keyframes).
@@ -203,6 +218,15 @@ On GroupDetail each scene card has **✂️ Split into Scenes**. It turns a full
 3. **File access:** the server must see Stash's files. `STASH_PATH_MAP=/data=/stash-library` (semicolon-separated `stashPrefix=localPrefix` pairs) maps Stash paths to server paths. Otherwise it falls back to the library path mappings.
    - `update-unraid.sh` mounts `STASH_LIBRARY_HOST_PATH` (`/mnt/user/Media/Other`, the host folder behind the Stash container's `/data`) at `/stash-library` read-write and sets the map.
    - ffmpeg is installed in the production images. `ffmpeg-static` and `@ffprobe-installer/ffprobe` are dev fallbacks.
+
+### 11. Scrape All for Title-Only Scenes ✅
+When a scene has a title but no performers and no URLs (scene URL, episode URLs or GEVI URL), **Scrape All** (`POST /api/stash/scenes/:id/scrape-all`) also searches GEVI and AEBN for the title as a movie title (`server/services/sceneTitleMovieSearchService.js`).
+- **Title cleanup:** the title is stripped of video extensions, `_`/`.` separators and bracketed text. A trailing "Scene N" / "Sc N" picks that scene from the movie.
+- **Searching:**
+  - GEVI is searched through its `/shtt` DataTables JSON endpoint (`geviScraper.searchMovieTitles`). `searchMovie` now uses this endpoint first and the browser search only as a fallback. If nothing is found, it retries with punctuation removed and then with the first three words.
+  - AEBN is searched with Puppeteer (`AebnScraper.searchMovies`, parsed by `parseAebnSearchResults`).
+- **Matching:** candidates are ranked by title similarity; a different volume number cuts the score. The top 3 at ≥ 60% are scraped as full movies (or as the requested scene). Performers and groups are matched against the database.
+- **Review:** the results appear first in the review modal as "GEVI/AEBN Movie Title Search" sources, with Title match %, ✓ IN DATABASE and ✦ NEW MOVIE badges.
 
 ## Architecture Summary
 

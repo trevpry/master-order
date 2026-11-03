@@ -1,11 +1,38 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
+import { blackCutCandidates } from './splitSegmentEdits';
 
 const MERGE_TOLERANCE = 0.25;
 const MIN_GAP = 0.5;
 const SEEK_THROTTLE_MS = 200;
 const NUDGES = [-5, -1, -0.1, 0.1, 1, 5];
 const COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#db2777', '#0891b2', '#65a30d', '#dc2626'];
+const TRACK_HEIGHT = 140;
+const FILM_HEIGHT = TRACK_HEIGHT - 16;
+const SCAN_WINDOWS = [
+  { value: '30', label: '±30s around each cut' },
+  { value: '90', label: '±90s around each cut' },
+  { value: '180', label: '±3 min around each cut' },
+  { value: '300', label: '±5 min around each cut' },
+  { value: 'full', label: 'Whole file (slow)' }
+];
+const FULL_SCAN_RADIUS = 180;
+const MIN_SCENE_OPTIONS = [30, 60, 120, 300];
+const isTyping = (event) => ['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target?.tagName);
+
+/** Nearest black interval to `time` within `radius`; the suggested cut is the middle of the black run. */
+export const suggestBlackCut = (intervals, time, radius) => {
+  let best = null;
+  intervals.forEach(iv => {
+    const distance = time < iv.start ? iv.start - time : (time > iv.end ? time - iv.end : 0);
+    if (distance > radius) return;
+    const suggested = Math.round(((iv.start + iv.end) / 2) * 10) / 10;
+    if (!best || distance < best.distance || (distance === best.distance && iv.duration > best.interval.duration)) {
+      best = { interval: iv, distance, suggested, delta: Math.round((suggested - time) * 10) / 10 };
+    }
+  });
+  return best;
+};
 
 export const formatPreciseClock = (seconds) => {
   if (!Number.isFinite(seconds)) return '';
@@ -67,12 +94,27 @@ const cueAt = (cues, time) => {
 
 const boundaryKey = (refs) => refs.map(r => `${r.index}:${r.field}`).join('|');
 
+const unionIntervals = (a, b) => {
+  const sorted = [...a, ...b].sort((x, y) => x.start - y.start);
+  const out = [];
+  sorted.forEach(iv => {
+    const last = out[out.length - 1];
+    if (last && iv.start <= last.end + 0.05) {
+      last.end = Math.max(last.end, iv.end);
+      last.duration = last.end - last.start;
+    } else out.push({ ...iv, duration: iv.end - iv.start });
+  });
+  return out;
+};
+
 /**
  * Visual cut-point editor for the group scene split modal. Segments use the modal's editable
- * shape ({ number, include, startText, endText }); edits are reported through onSetTimes so the
- * table and timeline always share one source of truth.
+ * shape ({ uid, number, include, startText, endText }); edits are reported through onSetTimes /
+ * onInsertCuts / onRemoveCut so the table and timeline always share one source of truth.
  */
-export default function SplitTimeline({ duration, segments, errors, media, preferHls, parseClock, onSetTimes }) {
+export default function SplitTimeline({
+  duration, segments, errors, media, preferHls, parseClock, onSetTimes, onInsertCuts, onRemoveCut, initialBlackFrames, scan: scanConfig
+}) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const trackRef = useRef(null);
@@ -87,6 +129,20 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
   const [selectedKey, setSelectedKey] = useState(null);
   const [draggingKey, setDraggingKey] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const [scanWindow, setScanWindow] = useState('90');
+  // Results stored by an earlier scan (e.g. the group-wide "Scan all clips") are shown straight away
+  const [scan, setScan] = useState(() => (initialBlackFrames?.intervals ? {
+    status: 'completed',
+    stored: true,
+    intervals: initialBlackFrames.intervals,
+    fullScan: initialBlackFrames.fullScan,
+    window: initialBlackFrames.fullScan ? FULL_SCAN_RADIUS : 90
+  } : null));
+  const [minSceneLength, setMinSceneLength] = useState(60);
+  const [cutMessage, setCutMessage] = useState(null);
+  const scanPollRef = useRef(null);
+  const scanIdRef = useRef(null);
+  const selectTimeRef = useRef(null);
 
   const total = Math.max(1, Number(duration) || 1);
   const pct = (t) => `${(Math.min(Math.max(t, 0), total) / total) * 100}%`;
@@ -206,6 +262,45 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
   const selectedIndex = boundaries.findIndex(b => b.key === selectedKey);
   const selected = selectedIndex >= 0 ? boundaries[selectedIndex] : null;
 
+  // A cut can be removed when it is the shared end/start of two neighboring segments
+  const mergePairFor = (boundary) => {
+    if (!boundary) return null;
+    const end = boundary.refs.find(r => r.field === 'endText');
+    const start = end && boundary.refs.find(r => r.field === 'startText' && r.index === end.index + 1);
+    return start ? { left: end.index, right: start.index } : null;
+  };
+  const selectedMerge = mergePairFor(selected);
+
+  // Boundary keys are index based, so after inserting/removing a cut re-select by time
+  useEffect(() => {
+    if (selectTimeRef.current === null) return;
+    const target = selectTimeRef.current;
+    selectTimeRef.current = null;
+    const match = boundaries.find(b => Math.abs(b.time - target) <= MERGE_TOLERANCE);
+    setSelectedKey(match ? match.key : null);
+  }, [boundaries]);
+
+  const insertCutsAt = (times, { select = times.length === 1 } = {}) => {
+    if (!onInsertCuts || !times.length) return 0;
+    const added = onInsertCuts(times);
+    if (added && select) selectTimeRef.current = Math.round(times[0] * 10) / 10;
+    else if (added) {
+      selectTimeRef.current = null;
+      setSelectedKey(null);
+    }
+    setCutMessage(added
+      ? `Added ${added} cut${added === 1 ? '' : 's'}.`
+      : 'No cut added — the time must be inside a scene and at least 1s from its start and end.');
+    return added;
+  };
+
+  const removeSelectedCut = () => {
+    if (!selectedMerge || !onRemoveCut) return;
+    onRemoveCut(selectedMerge.left, selectedMerge.right);
+    setSelectedKey(null);
+    setCutMessage(`Removed the cut at ${formatPreciseClock(selected.time)}; the two scenes were merged.`);
+  };
+
   const limitsFor = (index) => ({
     min: index > 0 ? boundaries[index - 1].time + MIN_GAP : 0,
     max: index < boundaries.length - 1 ? boundaries[index + 1].time - MIN_GAP : total
@@ -280,7 +375,24 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
   };
 
   const onKeyDown = (event) => {
-    if (!selected || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    if (isTyping(event)) return;
+    if ((event.key === 'c' || event.key === 'C') && !event.ctrlKey && !event.metaKey && onInsertCuts) {
+      event.preventDefault();
+      insertCutsAt([videoRef.current?.currentTime ?? currentTime]);
+      return;
+    }
+    if (!selected) return;
+    if ((event.key === 'Delete' || event.key === 'Backspace') && selectedMerge) {
+      event.preventDefault();
+      removeSelectedCut();
+      return;
+    }
+    if ((event.key === 's' || event.key === 'S') && !event.ctrlKey && !event.metaKey && suggestions[selected.key]) {
+      event.preventDefault();
+      applySuggestion(selectedIndex);
+      return;
+    }
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault();
     const step = event.shiftKey ? 5 : (event.altKey || event.ctrlKey ? 0.1 : 1);
     moveBoundary(selectedIndex, selected.time + (event.key === 'ArrowLeft' ? -step : step), { force: true });
@@ -295,6 +407,127 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
   const describeBoundary = (boundary) => boundary.refs
     .map(r => `${r.field === 'startText' ? 'start' : 'end'} of #${segments[r.index]?.number}`)
     .join(' / ');
+
+  // ---- Black-frame scan and suggestions ----
+  const stopScanPolling = () => {
+    if (scanPollRef.current) clearInterval(scanPollRef.current);
+    scanPollRef.current = null;
+  };
+
+  useEffect(() => () => {
+    stopScanPolling();
+    if (scanIdRef.current && scanConfig?.api) {
+      fetch(`${scanConfig.api}/group-split-black-scans/${scanIdRef.current}/cancel`, { method: 'POST' }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const startScan = async () => {
+    if (!scanConfig) return;
+    stopScanPolling();
+    const fullScan = scanWindow === 'full';
+    const previous = scan?.intervals || [];
+    const previousWindow = scan?.window || 0;
+    setScan({ status: 'running', progress: 0, intervals: previous, fullScan, window: fullScan ? FULL_SCAN_RADIUS : Number(scanWindow) });
+    try {
+      const res = await fetch(`${scanConfig.api}/groups/${scanConfig.groupId}/split/black-frames`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sceneId: scanConfig.sceneId,
+          cuts: boundaries.map(b => b.time),
+          window: fullScan ? undefined : Number(scanWindow),
+          fullScan
+        })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Scan failed');
+      scanIdRef.current = data.data.id;
+      const radius = Math.max(previousWindow, fullScan ? FULL_SCAN_RADIUS : data.data.window);
+      const tick = async () => {
+        try {
+          const r = await fetch(`${scanConfig.api}/group-split-black-scans/${data.data.id}`);
+          const d = await r.json();
+          if (!d.success) return;
+          // Black runs of the same file never change, so earlier results stay valid alongside the new ones
+          setScan({ ...d.data, window: radius, intervals: unionIntervals(previous, d.data.intervals || []) });
+          if (d.data.status !== 'running') {
+            stopScanPolling();
+            scanIdRef.current = null;
+          }
+        } catch {
+          // Transient; keep polling
+        }
+      };
+      scanPollRef.current = setInterval(tick, 1500);
+      tick();
+    } catch (e) {
+      setScan({ status: 'failed', error: e.message, intervals: previous, window: previousWindow });
+    }
+  };
+
+  const cancelScan = () => {
+    if (!scanIdRef.current || !scanConfig) return;
+    fetch(`${scanConfig.api}/group-split-black-scans/${scanIdRef.current}/cancel`, { method: 'POST' }).catch(() => {});
+    stopScanPolling();
+    scanIdRef.current = null;
+    setScan(prev => ({ ...prev, status: 'cancelled' }));
+  };
+
+  const blackIntervals = useMemo(() => scan?.intervals || [], [scan?.intervals]);
+  const suggestions = useMemo(() => {
+    if (!blackIntervals.length) return {};
+    const result = {};
+    boundaries.forEach(b => {
+      const s = suggestBlackCut(blackIntervals, b.time, scan?.window || 90);
+      if (s && Math.abs(s.delta) >= 0.1) result[b.key] = s;
+    });
+    return result;
+  }, [blackIntervals, boundaries, scan?.window]);
+  const pendingSuggestions = Object.keys(suggestions).length;
+  const blackCandidates = useMemo(
+    () => blackCutCandidates(blackIntervals, segments, { parseClock, minLength: minSceneLength }),
+    [blackIntervals, segments, parseClock, minSceneLength]
+  );
+
+  const applySuggestion = (index) => {
+    const s = suggestions[boundaries[index]?.key];
+    if (s) moveBoundary(index, s.suggested, { force: true });
+  };
+
+  // Snap every cut to its suggestion, skipping any that would cross a neighbor. An end/start pair around a gap
+  // may land on the same black run, which joins the two scenes at one shared cut.
+  const applyAllSuggestions = () => {
+    const targets = boundaries.map(b => suggestions[b.key]?.suggested ?? b.time);
+    const isEnd = (b) => b.refs.every(r => r.field === 'endText');
+    const isStart = (b) => b.refs.every(r => r.field === 'startText');
+    const fits = (i, a, j, c) => (c - a >= MIN_GAP) || (Math.abs(c - a) < 0.05 && isEnd(boundaries[i]) && isStart(boundaries[j]));
+    const placed = [];
+    boundaries.forEach((b, i) => {
+      const s = suggestions[b.key];
+      const prev = i > 0 ? placed[i - 1] : -Infinity;
+      const ok = s && (i === 0 || fits(i - 1, prev, i, s.suggested))
+        && (i === boundaries.length - 1 || fits(i, s.suggested, i + 1, targets[i + 1]));
+      placed[i] = ok ? s.suggested : b.time;
+      if (ok) onSetTimes(b.refs, s.suggested);
+      else targets[i] = b.time;
+    });
+  };
+
+  const onBlackClick = (event, interval) => {
+    event.stopPropagation();
+    const middle = Math.round(((interval.start + interval.end) / 2) * 10) / 10;
+    if (event.shiftKey && onInsertCuts) insertCutsAt([middle]);
+    else if (selected) moveBoundary(selectedIndex, middle, { force: true });
+    else seekVideo(middle, true);
+  };
+
+  const onTrackDoubleClick = (event) => {
+    if (!onInsertCuts) return;
+    insertCutsAt([Math.round(timeFromEvent(event) * 10) / 10]);
+  };
+
+  const selectedSuggestion = selected ? suggestions[selected.key] : null;
 
   const hoverCue = hover ? cueAt(cues, hover.time) : null;
   const trackRect = trackRef.current?.getBoundingClientRect();
@@ -343,10 +576,91 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
                 <button type="button" className="stl-btn" disabled={selectedIndex >= boundaries.length - 1} onClick={() => setSelectedKey(boundaries[selectedIndex + 1].key)}>Next cut ▶</button>
               </div>
               <div className="stl-muted">Drag the handle, use the buttons, or press ←/→ (Shift = 5s, Alt = 0.1s).</div>
+              {selectedSuggestion && (
+                <div className="stl-suggest">
+                  ⬛ Black frames at {formatPreciseClock(selectedSuggestion.interval.start)}–{formatPreciseClock(selectedSuggestion.interval.end)}
+                  <button type="button" className="stl-btn stl-btn-suggest" onClick={() => applySuggestion(selectedIndex)}>
+                    Snap to {formatPreciseClock(selectedSuggestion.suggested)} ({selectedSuggestion.delta > 0 ? '+' : '−'}{Math.abs(selectedSuggestion.delta).toFixed(1)}s) · S
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <div className="stl-muted">
               Click a cut handle on the timeline to select it, then drag or nudge it. Click anywhere on the timeline to seek the preview.
+            </div>
+          )}
+          {onInsertCuts && (
+            <div className="stl-cuts">
+              <div className="stl-nudges">
+                <button type="button" className="stl-btn" onClick={() => insertCutsAt([videoRef.current?.currentTime ?? currentTime])}>
+                  ✚ Insert cut at {formatPreciseClock(currentTime)} · C
+                </button>
+                {selectedMerge && onRemoveCut && (
+                  <button type="button" className="stl-btn stl-btn-danger" onClick={removeSelectedCut}>
+                    🗑 Remove this cut (merge #{segments[selectedMerge.left]?.number} + #{segments[selectedMerge.right]?.number}) · Del
+                  </button>
+                )}
+              </div>
+              <div className="stl-muted">Double-click the timeline (or Shift+click a black-frame chip) to add a cut there.</div>
+              {cutMessage && <div className="stl-cut-message">{cutMessage}</div>}
+            </div>
+          )}
+          {scanConfig && (
+            <div className="stl-scan">
+              <div className="stl-scan-row">
+                <strong>Suggest cuts from black frames</strong>
+              </div>
+              <div className="stl-scan-row">
+                <select value={scanWindow} onChange={(e) => setScanWindow(e.target.value)} disabled={scan?.status === 'running'}>
+                  {SCAN_WINDOWS.map(w => <option key={w.value} value={w.value}>{w.label}</option>)}
+                </select>
+                {scan?.status === 'running' ? (
+                  <button type="button" className="stl-btn" onClick={cancelScan}>Cancel</button>
+                ) : (
+                  <button type="button" className="stl-btn" disabled={!scanConfig.enabled} onClick={startScan} title={scanConfig.disabledReason || undefined}>
+                    🔍 {scan ? 'Rescan' : 'Find black frames'}
+                  </button>
+                )}
+              </div>
+              {!scanConfig.enabled && scanConfig.disabledReason && <div className="stl-muted">{scanConfig.disabledReason}</div>}
+              {scan?.status === 'running' && (
+                <div className="stl-progress"><div style={{ width: `${Math.round((scan.progress || 0) * 100)}%` }} /></div>
+              )}
+              {scan?.status === 'failed' && <div className="stl-scan-error">{scan.error}</div>}
+              {scan && scan.status !== 'failed' && scan.status !== 'running' && (
+                <div className="stl-muted">
+                  {blackIntervals.length} black run{blackIntervals.length === 1 ? '' : 's'} found
+                  {scan.status === 'cancelled' ? ' (cancelled)' : ''} · {pendingSuggestions} cut{pendingSuggestions === 1 ? '' : 's'} can snap
+                </div>
+              )}
+              {pendingSuggestions > 0 && scan?.status !== 'running' && (
+                <button type="button" className="stl-btn stl-btn-suggest" onClick={applyAllSuggestions}>
+                  ⬛ Snap all cuts to black frames ({pendingSuggestions})
+                </button>
+              )}
+              {onInsertCuts && blackIntervals.length > 0 && scan?.status !== 'running' && (
+                <div className="stl-scan-row">
+                  <button
+                    type="button"
+                    className="stl-btn stl-btn-suggest"
+                    disabled={!blackCandidates.length}
+                    onClick={() => insertCutsAt(blackCandidates, { select: false })}
+                    title="Adds a cut in the middle of every black run that isn't near an existing cut"
+                  >
+                    ✚ Insert cuts at black frames ({blackCandidates.length})
+                  </button>
+                  <label className="stl-muted">
+                    min scene
+                    <select value={minSceneLength} onChange={(e) => setMinSceneLength(Number(e.target.value))}>
+                      {MIN_SCENE_OPTIONS.map(v => <option key={v} value={v}>{v >= 60 ? `${v / 60} min` : `${v}s`}</option>)}
+                    </select>
+                  </label>
+                </div>
+              )}
+              {scan?.stored && scan.status === 'completed' && (
+                <div className="stl-muted">Showing stored results{scan.fullScan ? ' of a whole-file scan' : ''}.</div>
+              )}
             </div>
           )}
           <label className="stl-zoom">
@@ -363,13 +677,14 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
             ref={trackRef}
             className="stl-track"
             onClick={onTrackClick}
+            onDoubleClick={onTrackDoubleClick}
             onPointerMove={onTrackHover}
             onPointerLeave={() => !dragRef.current && setHover(null)}
           >
             {filmstrip.length > 0 && (
               <div className="stl-filmstrip">
                 {filmstrip.map((cue, i) => (
-                  <div key={i} className="stl-film" style={spriteStyle(cue, cue.w * (54 / cue.h), 54) || undefined} />
+                  <div key={i} className="stl-film" style={spriteStyle(cue, cue.w * (FILM_HEIGHT / cue.h), FILM_HEIGHT) || undefined} />
                 ))}
               </div>
             )}
@@ -379,7 +694,7 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
               const len = s.end - s.start;
               return (
                 <div
-                  key={s.number}
+                  key={s.uid ?? s.number}
                   className={`stl-seg${s.include ? '' : ' stl-seg-off'}${errors[s.index] ? ' stl-seg-error' : ''}`}
                   style={{ left: pct(s.start), width: pct(len), '--seg-color': color }}
                   title={`#${s.number} ${s.title || ''} · ${formatPreciseClock(s.start)}–${formatPreciseClock(s.end)}${errors[s.index] ? ` · ${errors[s.index]}` : ''}`}
@@ -395,6 +710,15 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
                 </div>
               );
             })}
+            {blackIntervals.map(iv => (
+              <div key={`b${iv.start}`} className="stl-black" style={{ left: pct(iv.start), width: `max(2px, ${pct(iv.end - iv.start)})` }} />
+            ))}
+            {boundaries.map(b => {
+              const s = suggestions[b.key];
+              return s ? (
+                <div key={`s${b.key}`} className="stl-suggest-mark" style={{ left: pct(s.suggested) }} title={`Suggested cut ${formatPreciseClock(s.suggested)}`} />
+              ) : null;
+            })}
             {boundaries.map((b, i) => (
               <div
                 key={b.key}
@@ -405,6 +729,7 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
                 onPointerUp={endDrag}
                 onPointerCancel={endDrag}
                 onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
                 title={`${formatPreciseClock(b.time)} — ${describeBoundary(b)}`}
               >
                 <span className="stl-handle-grip" />
@@ -412,6 +737,20 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
             ))}
             <div className="stl-playhead" style={{ left: pct(currentTime) }} />
           </div>
+          {blackIntervals.length > 0 && (
+            <div className="stl-black-lane" title="Black frames — click to snap the selected cut (or seek), Shift+click to insert a cut">
+              {blackIntervals.map(iv => (
+                <button
+                  key={`l${iv.start}`}
+                  type="button"
+                  className="stl-black-chip"
+                  style={{ left: pct(iv.start), width: `max(6px, ${pct(iv.end - iv.start)})` }}
+                  onClick={(e) => onBlackClick(e, iv)}
+                  title={`Black ${formatPreciseClock(iv.start)}–${formatPreciseClock(iv.end)} (${iv.duration.toFixed(1)}s)`}
+                />
+              ))}
+            </div>
+          )}
           <div className="stl-ruler">
             {Array.from({ length: 10 * zoom + 1 }, (_, i) => (
               <span key={i} style={{ left: `${(i / (10 * zoom)) * 100}%` }}>{formatPreciseClock(Math.round((i / (10 * zoom)) * total))}</span>
@@ -445,23 +784,39 @@ export default function SplitTimeline({ duration, segments, errors, media, prefe
         .stl-zoom { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; margin-top: auto; }
         .stl-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 0.25rem; }
         .stl-inner { position: relative; min-width: 100%; }
-        .stl-track { position: relative; height: 72px; background: #1f2937; border-radius: 0.375rem; cursor: crosshair; user-select: none; touch-action: none; }
-        .stl-filmstrip { position: absolute; inset: 9px 0; display: flex; overflow: hidden; opacity: 0.55; pointer-events: none; }
-        .stl-film { flex: 1 1 0; min-width: 0; height: 54px; background-repeat: no-repeat; }
+        .stl-track { position: relative; height: ${TRACK_HEIGHT}px; background: #1f2937; border-radius: 0.5rem; cursor: crosshair; user-select: none; touch-action: none; }
+        .stl-filmstrip { position: absolute; inset: 8px 0; display: flex; overflow: hidden; opacity: 0.6; pointer-events: none; }
+        .stl-film { flex: 1 1 0; min-width: 0; height: ${FILM_HEIGHT}px; background-repeat: no-repeat; }
         .stl-seg { position: absolute; top: 4px; bottom: 4px; background: color-mix(in srgb, var(--seg-color) 45%, transparent); border: 2px solid var(--seg-color); border-radius: 0.3rem; box-sizing: border-box; overflow: hidden; pointer-events: none; }
         .stl-seg-off { background: repeating-linear-gradient(45deg, rgba(107,114,128,0.35) 0 6px, rgba(107,114,128,0.15) 6px 12px); border-color: #6b7280; border-style: dashed; }
         .stl-seg-error { border-color: #ef4444; box-shadow: inset 0 0 0 2px #ef4444; }
-        .stl-seg-label { position: absolute; left: 6px; top: 3px; color: #fff; font-size: 0.75rem; font-weight: 700; white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,0.9); }
+        .stl-seg-label { position: absolute; left: 8px; top: 6px; color: #fff; font-size: 0.95rem; font-weight: 700; white-space: nowrap; text-shadow: 0 1px 3px rgba(0,0,0,0.95); }
         .stl-listed { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dotted rgba(255,255,255,0.75); }
-        .stl-handle { position: absolute; top: -6px; bottom: -6px; width: 16px; margin-left: -8px; cursor: ew-resize; z-index: 2; touch-action: none; }
-        .stl-handle::before { content: ''; position: absolute; left: 7px; top: 0; bottom: 0; width: 2px; background: #fbbf24; }
-        .stl-handle-grip { position: absolute; left: 2px; top: 50%; width: 12px; height: 26px; margin-top: -13px; border-radius: 4px; background: #fbbf24; border: 1px solid #92400e; box-sizing: border-box; }
+        .stl-handle { position: absolute; top: -8px; bottom: -8px; width: 22px; margin-left: -11px; cursor: ew-resize; z-index: 2; touch-action: none; }
+        .stl-handle::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 3px; background: #fbbf24; }
+        .stl-handle-grip { position: absolute; left: 2px; top: 50%; width: 19px; height: 48px; margin-top: -24px; border-radius: 5px; background: #fbbf24; border: 1px solid #92400e; box-sizing: border-box; }
         .stl-handle-off::before, .stl-handle-off .stl-handle-grip { background: #9ca3af; border-color: #4b5563; }
         .stl-handle:hover .stl-handle-grip, .stl-handle-selected .stl-handle-grip { background: #fff; border-color: #7c3aed; box-shadow: 0 0 0 2px #7c3aed; }
         .stl-handle-selected::before { background: #fff; }
         .stl-handle-dragging { z-index: 3; }
         .stl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #ef4444; pointer-events: none; z-index: 1; }
-        .stl-ruler { position: relative; height: 18px; font-size: 0.7rem; color: #6b7280; }
+        .stl-ruler { position: relative; height: 22px; margin-top: 2px; font-size: 0.8rem; color: #6b7280; }
+        .stl-black { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,0.75); pointer-events: none; z-index: 1; }
+        .stl-suggest-mark { position: absolute; top: 0; bottom: 0; width: 0; border-left: 3px dashed #22d3ee; pointer-events: none; z-index: 1; }
+        .stl-black-lane { position: relative; height: 18px; margin-top: 4px; background: rgba(107,114,128,0.15); border-radius: 0.25rem; }
+        .stl-black-chip { position: absolute; top: 2px; bottom: 2px; padding: 0; background: #111827; border: 1px solid #22d3ee; border-radius: 3px; cursor: pointer; }
+        .stl-black-chip:hover { background: #22d3ee; }
+        .stl-scan { display: flex; flex-direction: column; gap: 0.4rem; padding-top: 0.5rem; border-top: 1px solid rgba(107,114,128,0.25); }
+        .stl-scan-row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+        .stl-scan select { padding: 0.3rem 0.4rem; border: 1px solid #d1d5db; border-radius: 0.375rem; background: var(--bg-secondary, #fff); color: inherit; font-size: 0.82rem; }
+        .stl-scan-error { color: #dc2626; font-size: 0.8rem; }
+        .stl-progress { height: 6px; border-radius: 3px; background: rgba(107,114,128,0.25); overflow: hidden; }
+        .stl-progress > div { height: 100%; background: #22d3ee; transition: width 0.4s; }
+        .stl-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.82rem; }
+        .stl-btn-suggest { border-color: #22d3ee; }
+        .stl-btn-danger { border-color: #f87171; color: #dc2626; }
+        .stl-cuts { display: flex; flex-direction: column; gap: 0.35rem; padding-top: 0.5rem; border-top: 1px solid rgba(107,114,128,0.25); }
+        .stl-cut-message { font-size: 0.8rem; color: #7c3aed; }
         .stl-ruler span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
         .stl-ruler span:first-child { transform: none; }
         .stl-ruler span:last-child { transform: translateX(-100%); }

@@ -1838,7 +1838,47 @@ class GeviScraperService {
    * @param {string} title - Movie title to search for
    * @returns {Promise<Array>} Array of movie objects with name and url
    */
+  /**
+   * Search GEVI movie titles through the search page's DataTables JSON endpoint (no browser needed).
+   * @returns {Promise<Array<{name, url, year, studio, type}>>}
+   */
+  async searchMovieTitles(title, { limit = 10, where = 'containing' } = {}) {
+    const query = String(title || '').trim();
+    if (!query) return [];
+    const response = await axios.get(`${this.baseUrl}/shtt`, {
+      params: {
+        draw: 1,
+        start: 0,
+        length: Math.max(1, Math.min(limit, 100)),
+        'search[value]': query,
+        'search[regex]': false,
+        'columns[1][name]': 'title',
+        'columns[1][search][value]': where,
+        'order[0][column]': 1,
+        'order[0][dir]': 'asc'
+      },
+      headers: {
+        'Referer': `${this.baseUrl}/search`,
+        'X-Requested-With': 'XMLHttpRequest',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 20000
+    });
+    return parseGeviMovieTableRows(response.data, this.baseUrl).slice(0, limit);
+  }
+
   async searchMovie(title) {
+    try {
+      const movies = await this.searchMovieTitles(title, { limit: 10 });
+      console.log(`✅ GEVI title search found ${movies.length} movie(s) matching "${title}"`);
+      return movies;
+    } catch (error) {
+      console.warn(`⚠️ GEVI title search endpoint failed (${error.message}); trying the browser search`);
+    }
+    return this.searchMovieWithBrowser(title);
+  }
+
+  async searchMovieWithBrowser(title) {
     let browser = null;
     
     try {
@@ -2857,4 +2897,32 @@ class GeviScraperService {
   }
 }
 
+// Rows from GEVI's movie DataTables endpoint: [ctrl, "<a href='/video/ID'>Title</a>", year, "<a ...>Company</a>", line, type, ...]
+function parseGeviMovieTableRows(payload, baseUrl = 'https://gayeroticvideoindex.com') {
+  const data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+  const rows = Array.isArray(data?.data) ? data.data : [];
+  const results = [];
+  const seen = new Set();
+  rows.forEach((row) => {
+    if (!Array.isArray(row)) return;
+    const $title = cheerio.load(`<div>${row[1] || ''}</div>`)('a').first();
+    const href = $title.attr('href');
+    const name = $title.text().trim();
+    if (!href || !name) return;
+    const url = /^https?:/i.test(href) ? href : `${baseUrl}/${href.replace(/^\/+/, '')}`;
+    if (seen.has(url)) return;
+    seen.add(url);
+    const studio = cheerio.load(`<div>${row[3] || ''}</div>`)('div').text().trim() || null;
+    results.push({
+      name,
+      url,
+      year: row[2] ? String(row[2]).trim() : null,
+      studio,
+      type: row[5] ? String(row[5]).trim() : null
+    });
+  });
+  return results;
+}
+
 module.exports = GeviScraperService;
+module.exports.parseGeviMovieTableRows = parseGeviMovieTableRows;

@@ -38,6 +38,7 @@ const {
 } = require('../services/stashGroupPerformerService');
 const { upsertSceneFromStash } = require('../services/stashSceneLocalSync');
 const groupSceneSplit = require('../services/groupSceneSplitService');
+const sceneTitleMovieSearch = require('../services/sceneTitleMovieSearchService');
 const {
   normalizeScrapedPerformers,
   normalizeScrapedTags,
@@ -4424,11 +4425,14 @@ router.post('/group-performers/reconcile', asyncHandler(async (req, res) => {
 // Group scene splitting (full movie -> one scene per AEBN scene length)
 // ---------------------------------------------------------------------------
 
+const splitBlackFrameStore = new (require('../services/stashBlackFrameStore').BlackFrameStore)();
+
 const splitDeps = async () => ({
   prisma,
   graphql: await getStashGraphqlOrNull(),
   geviScraper,
   actionCodeService,
+  blackFrameStore: splitBlackFrameStore,
   ffmpegPath: require('../config/ffmpegConfig').ffmpegPath || 'ffmpeg',
   scrapeAebn: async (url) => {
     const registry = await getScraperRegistry();
@@ -4468,6 +4472,37 @@ router.post('/groups/:id/split', asyncHandler(async (req, res) => {
   } catch (error) {
     return sendSplitError(res, error);
   }
+}));
+
+// POST /api/stash/groups/:id/split/black-frames { sceneId, cuts?, window?, fullScan? } - Start a blackdetect scan for cut suggestions
+router.post('/groups/:id/split/black-frames', asyncHandler(async (req, res) => {
+  try {
+    sendSuccess(res, await groupSceneSplit.startBlackScan(await splitDeps(), req.params.id, req.body || {}));
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+}));
+
+// GET /api/stash/group-split-black-scans/:scanId - Black-frame scan progress and intervals
+router.get('/group-split-black-scans/:scanId', asyncHandler(async (req, res) => {
+  const scan = groupSceneSplit.getBlackScan(req.params.scanId);
+  if (!scan) return sendNotFound(res, 'Black-frame scan not found');
+  sendSuccess(res, scan);
+}));
+
+// POST /api/stash/group-split-black-scans/:scanId/cancel
+router.post('/group-split-black-scans/:scanId/cancel', asyncHandler(async (req, res) => {
+  try {
+    sendSuccess(res, groupSceneSplit.cancelBlackScan(req.params.scanId));
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+}));
+
+// GET /api/stash/groups/:id/black-frames?sceneIds=1,2 - The group's running clip scan plus stored results per scene
+router.get('/groups/:id/black-frames', asyncHandler(async (req, res) => {
+  const sceneIds = String(req.query.sceneIds || '').split(',').map(s => s.trim()).filter(Boolean);
+  sendSuccess(res, await groupSceneSplit.getGroupBlackFrames({ blackFrameStore: splitBlackFrameStore }, req.params.id, sceneIds));
 }));
 
 // GET /api/stash/groups/:id/split-jobs - Recent split jobs for a group (in-memory, newest first)
@@ -5272,6 +5307,38 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
   const searchTerms = collectScenePerformerSearchTerms(sceneWithPerformers);
   const performerEntries = (sceneWithPerformers?.performers || []).map((entry) => entry?.performer || entry || {});
 
+  // Title-only scenes: search GEVI and AEBN for the title as a movie (runs alongside stash-box lookups)
+  const titleOnlyScene = sceneTitleMovieSearch.isTitleOnlyScene({
+    title: sceneWithPerformers?.title,
+    performerCount: performerEntries.length,
+    urlCount: sceneUrls.filter(Boolean).length + (knownGeviUrl ? 1 : 0)
+  });
+  let titleSearchPromise = null;
+  if (titleOnlyScene) {
+    console.log(`🔎 [Scrape All] Title-only scene; searching GEVI and AEBN movies for "${sceneWithPerformers.title}"`);
+    let aebnScraper = null;
+    const getAebnScraper = async () => {
+      if (!aebnScraper) {
+        const registry = await getScraperRegistry();
+        aebnScraper = registry.getAllScrapers().find(s => s.siteName === 'AEBN') || new (require('../services/scrapers/AebnScraper'))();
+      }
+      return aebnScraper;
+    };
+    titleSearchPromise = sceneTitleMovieSearch.searchMoviesByTitle(sceneWithPerformers.title, {
+      searchGevi: (q) => geviScraper.searchMovie(q),
+      scrapeGevi: (url) => geviScraper.movieFromUrl(url),
+      searchAebn: async (q) => (await getAebnScraper()).searchMovies(q),
+      scrapeAebn: async (url, sceneNumber) => (await getAebnScraper()).scrape(url, [], sceneNumber || null),
+      matchPerformers: (list) => geviScraper.matchPerformers(list, prisma),
+      matchGroups: (movies) => geviScraper.matchGroups(movies, prisma),
+      proxyGeviImage: (img) => `/api/stash/gevi-image-proxy?url=${encodeURIComponent(img)}`,
+      log: (message) => console.log(`   [Scrape All] ${message}`)
+    }).catch((error) => {
+      console.warn('⚠️ [Scrape All] Title movie search failed:', error.message);
+      return null;
+    });
+  }
+
   for (const box of stashBoxes) {
     const endpoint = box.endpoint;
     if (!endpoint) {
@@ -5708,9 +5775,17 @@ router.post('/scenes/:id/scrape-all', asyncHandler(async (req, res) => {
     }
   }
 
+  const titleSearch = titleSearchPromise ? await titleSearchPromise : null;
+  if (titleSearch) {
+    sources.unshift(...titleSearch.sources);
+  }
+
   sendSuccess(res, {
-    message: `Compared ${sources.length} source(s).`,
+    message: titleSearch
+      ? `Searched GEVI and AEBN for "${titleSearch.query}" as a movie title; compared ${sources.length} source(s).`
+      : `Compared ${sources.length} source(s).`,
     sceneId: scene.id,
+    titleSearch: titleSearch ? { query: titleSearch.query, sceneNumber: titleSearch.sceneNumber } : null,
     sources,
     totalResults: sources.reduce((total, source) => total + source.resultCount, 0)
   });

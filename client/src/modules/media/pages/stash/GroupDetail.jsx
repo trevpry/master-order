@@ -6,6 +6,7 @@ import SceneGrid from './components/SceneGrid';
 import EditGroupModal from './components/EditGroupModal';
 import GroupPerformers from './components/GroupPerformers';
 import SplitSceneModal from './components/SplitSceneModal';
+import GroupBlackFrameScan from './components/GroupBlackFrameScan';
 import config from '../../../../config';
 
 export default function GroupDetail() {
@@ -17,6 +18,7 @@ export default function GroupDetail() {
   const [showScrapeModal, setShowScrapeModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [splitScene, setSplitScene] = useState(null);
+  const [blackFramesRefresh, setBlackFramesRefresh] = useState(0);
   const [selectedSceneIds, setSelectedSceneIds] = useState([]);
   const [bulkDeleteFiles, setBulkDeleteFiles] = useState(true);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -828,6 +830,12 @@ export default function GroupDetail() {
           
           return scenes.length > 0 ? (
             <>
+              <GroupBlackFrameScan
+                groupId={group.id}
+                scenes={scenes}
+                onOpenScene={setSplitScene}
+                refreshToken={blackFramesRefresh}
+              />
               <div className="group-bulk-bar">
                 <label>
                   <input
@@ -1121,7 +1129,10 @@ export default function GroupDetail() {
         <SplitSceneModal
           groupId={group.id}
           scene={splitScene}
-          onClose={() => setSplitScene(null)}
+          onClose={() => {
+            setSplitScene(null);
+            setBlackFramesRefresh(n => n + 1);
+          }}
           onFinished={() => fetchGroup({ silent: true })}
         />
       )}

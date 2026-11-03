@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { getSceneDisplayTitle, getSceneImageUrl } from '../../../utils/stashUtils';
 
+const MOVIE_SEARCH_ENDPOINTS = new Set(['gevi-movie-search', 'gevi-title-search', 'aebn-title-search']);
+
 export default function ScrapeAllReviewModal({
   isOpen,
   onClose,
@@ -1925,14 +1927,19 @@ export default function ScrapeAllReviewModal({
                             <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                               <div style={{ fontSize: '14px', color: '#111827', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                                 {result.title || `Result ${resultIndex + 1}`}
-                                {sourceResult.endpoint === 'gevi-movie-search' && Array.isArray(result.matched?.groups) && result.matched.groups.length > 0 && (
+                                {MOVIE_SEARCH_ENDPOINTS.has(sourceResult.endpoint) && Array.isArray(result.matched?.groups) && result.matched.groups.length > 0 && (
                                   <span style={{ padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '10px', fontWeight: 700, background: '#dcfce7', color: '#166534', flexShrink: 0 }}>
                                     ✓ IN DATABASE
                                   </span>
                                 )}
-                                {sourceResult.endpoint === 'gevi-movie-search' && (!result.matched?.groups?.length) && Array.isArray(result.unmatched?.groups) && result.unmatched.groups.length > 0 && (
+                                {MOVIE_SEARCH_ENDPOINTS.has(sourceResult.endpoint) && (!result.matched?.groups?.length) && Array.isArray(result.unmatched?.groups) && result.unmatched.groups.length > 0 && (
                                   <span style={{ padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '10px', fontWeight: 700, background: '#ffedd5', color: '#9a3412', flexShrink: 0 }}>
                                     ✦ NEW MOVIE
+                                  </span>
+                                )}
+                                {typeof result.matchScore === 'number' && (
+                                  <span style={{ padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '10px', fontWeight: 700, background: '#e0e7ff', color: '#3730a3', flexShrink: 0 }}>
+                                    Title match {Math.round(result.matchScore * 100)}%
                                   </span>
                                 )}
                               </div>

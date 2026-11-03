@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import config from '../../../../../config';
 import SplitTimeline, { formatPreciseClock } from './SplitTimeline';
+import { insertCuts, newSegmentUid, removeCut } from './splitSegmentEdits';
 
 const formatClock = (seconds) => {
   if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return '';
@@ -29,6 +30,7 @@ const formatBytes = (bytes) => {
 
 const toEditable = (segments) => segments.map(seg => ({
   ...seg,
+  uid: newSegmentUid(),
   include: true,
   startText: formatClock(seg.start),
   endText: formatClock(seg.end)
@@ -153,6 +155,19 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
     }));
   }, []);
 
+  const groupName = plan?.group?.name || '';
+
+  // Returns how many of the requested cuts were added (times too close to an existing cut are ignored)
+  const insertCutsAt = useCallback((times) => {
+    const result = insertCuts(segments, times, { parseClock, formatTime: formatPreciseClock, groupName });
+    if (result.inserted.length) setSegments(result.segments);
+    return result.inserted.length;
+  }, [segments, groupName]);
+
+  const removeCutBetween = useCallback((leftIndex, rightIndex) => {
+    setSegments(prev => removeCut(prev, leftIndex, rightIndex, { parseClock, groupName }));
+  }, [groupName]);
+
   const removeChip = (index, key, id) => {
     setSegments(prev => prev.map((s, i) => (i === index ? { ...s, [key]: s[key].filter(x => x.id !== id) } : s)));
   };
@@ -174,7 +189,10 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
     });
     return errors;
   })();
-  const canStart = plan && included.length > 0 && Object.keys(segmentErrors).length === 0
+  const duration = plan?.source?.duration || 0;
+  const wholeFileOnly = segments.length === 1 && included.length === 1
+    && parseClock(segments[0].startText) <= 1 && parseClock(segments[0].endText) >= duration - 1;
+  const canStart = plan && included.length > 0 && !wholeFileOnly && Object.keys(segmentErrors).length === 0
     && plan.fileAccess?.readable && plan.fileAccess?.writable && plan.ffmpegAvailable;
 
   const startSplit = async () => {
@@ -290,7 +308,7 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
               </button>
             </div>
 
-            {loading && <p className="ssm-note">⏳ Scraping AEBN scene lengths and GEVI scene details (this can take ~20 seconds)…</p>}
+            {loading && <p className="ssm-note">⏳ Loading the clip and scraping AEBN scene lengths / GEVI scene details when available (this can take ~20 seconds)…</p>}
             {error && (
               <p className="ssm-error">
                 {error}
@@ -303,7 +321,7 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                 <div className="ssm-info">
                   <div><strong>File:</strong> {plan.source.basename} · {formatClock(plan.source.duration)} · {plan.source.width}×{plan.source.height} · {plan.source.videoCodec}/{plan.source.audioCodec || 'no audio'} · {formatBytes(plan.source.size)}</div>
                   <div><strong>Studio:</strong> {plan.studio?.name || '—'} · <strong>Sources:</strong>{' '}
-                    <a href={plan.aebnUrl} target="_blank" rel="noreferrer">AEBN</a>
+                    {plan.aebnUrl ? <a href={plan.aebnUrl} target="_blank" rel="noreferrer">AEBN</a> : 'none'}
                     {plan.geviUrl && <> · <a href={plan.geviUrl} target="_blank" rel="noreferrer">GEVI</a></>}
                   </div>
                 </div>
@@ -320,6 +338,9 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                   <p className="ssm-error">Can't access the video file from the server: {plan.fileAccess.error}</p>
                 )}
                 {plan.warnings?.map((w, i) => <p key={i} className="ssm-warning">⚠️ {w}</p>)}
+                {plan.mode === 'manual' && (
+                  <p className="ssm-note">✍️ Manual mode: there are no AEBN scene lengths, so the clip starts as one scene. Insert cut lines on the timeline (playhead, double-click, or from black frames) to split it.</p>
+                )}
 
                 <SplitTimeline
                   duration={plan.source.duration}
@@ -329,6 +350,18 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                   preferHls={Boolean(plan.transcodeReason)}
                   parseClock={parseClock}
                   onSetTimes={setCutTimes}
+                  onInsertCuts={insertCutsAt}
+                  onRemoveCut={removeCutBetween}
+                  initialBlackFrames={plan.blackFrames}
+                  scan={{
+                    api,
+                    groupId,
+                    sceneId: scene.id,
+                    enabled: Boolean(plan.ffmpegAvailable && plan.fileAccess?.readable),
+                    disabledReason: !plan.ffmpegAvailable
+                      ? 'ffmpeg is not available on the server.'
+                      : (!plan.fileAccess?.readable ? 'The server can\'t read the video file, so it can\'t be scanned.' : null)
+                  }}
                 />
 
                 <table className="ssm-table">
@@ -340,7 +373,7 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                       const start = parseClock(s.startText);
                       const end = parseClock(s.endText);
                       return (
-                        <tr key={s.number} className={s.include ? '' : 'ssm-excluded'}>
+                        <tr key={s.uid} className={s.include ? '' : 'ssm-excluded'}>
                           <td><input type="checkbox" checked={s.include} onChange={(e) => updateSegment(i, { include: e.target.checked })} /></td>
                           <td>{s.number}</td>
                           <td><input className="ssm-time" value={s.startText} onChange={(e) => updateSegment(i, { startText: e.target.value })} /></td>
@@ -380,6 +413,7 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                   </tbody>
                 </table>
 
+                {wholeFileOnly && <p className="ssm-note">Insert at least one cut line to split this clip.</p>}
                 <div className="ssm-footer">
                   <label>
                     After splitting, the original scene should

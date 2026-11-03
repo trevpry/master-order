@@ -195,6 +195,42 @@ function parseAebnMoviePage(html) {
   };
 }
 
+const AEBN_MOVIE_PATH = /^\/gay\/movies\/\d+\/[^/?#]+/;
+
+// Movie hits from an AEBN search page, in page (relevance) order: [{ url, title, image }]
+function parseAebnSearchResults(html) {
+  const $ = cheerio.load(html || '');
+  const byUrl = new Map();
+
+  $('a[href*="/gay/movies/"]').each((_, el) => {
+    const $a = $(el);
+    const href = String($a.attr('href') || '').replace(/^https?:\/\/[^/]+/, '');
+    const match = href.match(AEBN_MOVIE_PATH);
+    if (!match) return;
+    const url = absoluteUrl(match[0]);
+    const isSceneLink = href.includes('#scene-');
+    const $img = $a.find('img').first();
+    const $item = $a.closest('.dts-collection-item');
+
+    const title = ((isSceneLink ? '' : cleanText($img.attr('title')))
+      || (isSceneLink ? '' : cleanText($a.text()))
+      || cleanText($item.find('h2 span').first().text())
+      || (isSceneLink ? '' : cleanText(($img.attr('alt') || '').replace(/^Gay Adult Movie\s+/i, ''))))
+      .replace(/^Scene\s+\d+\s*,\s*/i, '');
+    const image = absoluteUrl($img.attr('src') || $img.attr('data-src') || null);
+
+    const existing = byUrl.get(url);
+    if (!existing) {
+      byUrl.set(url, { url, title: title || '', image: image || null });
+    } else {
+      if (!existing.title && title) existing.title = title;
+      if (!existing.image && image) existing.image = image;
+    }
+  });
+
+  return [...byUrl.values()].filter(hit => hit.title);
+}
+
 // AEBN shows dates like "Jan 05, 2021" or "01/05/2021"; Stash wants YYYY-MM-DD
 function normalizeDate(text) {
   const value = cleanText(text);
@@ -223,6 +259,46 @@ class AebnScraper {
   canHandle(url) {
     if (!url) return false;
     return this.sceneUrlPatterns.some(pattern => url.includes(pattern));
+  }
+
+  /**
+   * Search AEBN movies by title (passes the age gate with Puppeteer).
+   * @returns {Promise<Array<{url, title, image}>>} hits in AEBN relevance order
+   */
+  async searchMovies(query, { limit = 20 } = {}) {
+    const text = cleanText(query);
+    if (!text) return [];
+    const searchUrl = `https://gay.aebn.com/gay/search?queryType=Free+Form&query=${encodeURIComponent(text)}`;
+    console.log(`🔎 [AEBN Scraper] Movie title search: "${text}"`);
+
+    let browser = null;
+    try {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+      });
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+
+      const ageGateButton = await page.$('a.button.enter, a[href*="gate-redirect"]');
+      if (ageGateButton) {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+          ageGateButton.click()
+        ]);
+      }
+
+      const html = await page.content();
+      const hits = parseAebnSearchResults(html).slice(0, limit);
+      console.log(`   - ${hits.length} movie hit(s)`);
+      return hits;
+    } finally {
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+    }
   }
 
   /**
@@ -536,5 +612,6 @@ class AebnScraper {
 
 module.exports = AebnScraper;
 module.exports.parseAebnMoviePage = parseAebnMoviePage;
+module.exports.parseAebnSearchResults = parseAebnSearchResults;
 module.exports.parseAebnDuration = parseAebnDuration;
 module.exports.parseClockToSeconds = parseClockToSeconds;
