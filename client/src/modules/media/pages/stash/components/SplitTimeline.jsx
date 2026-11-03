@@ -17,6 +17,23 @@ const SCAN_WINDOWS = [
   { value: 'full', label: 'Whole file (slow)' }
 ];
 const FULL_SCAN_RADIUS = 180;
+const MAX_AUTO_RECOVERIES = 4;
+// Stash transcodes HLS on demand, so the first segment after a seek can take a while: be patient and retry.
+const retryPolicy = (firstByteMs, loadMs, retries) => ({
+  default: {
+    maxTimeToFirstByteMs: firstByteMs,
+    maxLoadTimeMs: loadMs,
+    timeoutRetry: { maxNumRetry: retries, retryDelayMs: 1000, maxRetryDelayMs: 8000 },
+    errorRetry: { maxNumRetry: retries, retryDelayMs: 1000, maxRetryDelayMs: 8000 }
+  }
+});
+const STASH_HLS_CONFIG = {
+  manifestLoadPolicy: retryPolicy(30000, 60000, 4),
+  playlistLoadPolicy: retryPolicy(30000, 60000, 4),
+  fragLoadPolicy: retryPolicy(45000, 180000, 6),
+  maxBufferLength: 30,
+  backBufferLength: 30
+};
 const MIN_SCENE_OPTIONS = [30, 60, 120, 300];
 const isTyping = (event) => ['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target?.tagName);
 
@@ -148,48 +165,148 @@ export default function SplitTimeline({
   const pct = (t) => `${(Math.min(Math.max(t, 0), total) / total) * 100}%`;
 
   // ---- Video source: direct stream, falling back to Stash's transcoded HLS ----
-  const attachHls = useCallback(() => {
+  // Position/play state survive reloads, so a recovered stream resumes where it failed.
+  const positionRef = useRef(0);
+  const wasPlayingRef = useRef(false);
+  const recoveryRef = useRef({ attempts: 0, timer: null });
+  const usingHlsRef = useRef(false);
+  const directRetriedRef = useRef(false);
+  const pendingResumeRef = useRef(false);
+  const recoverRef = useRef(() => {});
+
+  const clearRecoveryTimer = () => {
+    clearTimeout(recoveryRef.current.timer);
+    recoveryRef.current.timer = null;
+  };
+
+  const resumeAt = (video, position) => {
+    pendingResumeRef.current = true;
+    const apply = () => {
+      pendingResumeRef.current = false;
+      if (position > 0 && Math.abs(video.currentTime - position) > 0.5) video.currentTime = position;
+      if (wasPlayingRef.current) video.play().catch(() => {});
+    };
+    if (video.readyState >= 1) apply();
+    else video.addEventListener('loadedmetadata', apply, { once: true });
+  };
+
+  const attachHls = useCallback((startAt = positionRef.current) => {
     const video = videoRef.current;
     if (!video || !media?.hlsUrl) return false;
     hlsRef.current?.destroy();
     hlsRef.current = null;
+    usingHlsRef.current = true;
     setUsingHls(true);
     if (Hls.isSupported()) {
-      const hls = new Hls({ startPosition: video.currentTime || 0 });
+      const hls = new Hls({ startPosition: startAt || 0, ...STASH_HLS_CONFIG });
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) setVideoError('Preview stream failed to load. Cut points can still be edited.');
+        if (!data.fatal || hlsRef.current !== hls) return;
+        recoverRef.current(data.type === Hls.ErrorTypes.MEDIA_ERROR ? 'media' : 'network');
+      });
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        if (hlsRef.current === hls) recoveryRef.current.attempts = 0;
       });
       hls.loadSource(media.hlsUrl);
       hls.attachMedia(video);
       hlsRef.current = hls;
+      resumeAt(video, startAt);
       return true;
     }
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = media.hlsUrl;
+      resumeAt(video, startAt);
       return true;
     }
     return false;
   }, [media?.hlsUrl]);
 
+  const attachDirect = useCallback((startAt = positionRef.current) => {
+    const video = videoRef.current;
+    if (!video || !media?.directUrl) return false;
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+    usingHlsRef.current = false;
+    setUsingHls(false);
+    video.src = media.directUrl;
+    video.load();
+    resumeAt(video, startAt);
+    return true;
+  }, [media?.directUrl]);
+
+  /** Automatic recovery: a few retries with back-off at the current position, then a manual Reload button. */
+  const recoverStream = useCallback((kind) => {
+    const state = recoveryRef.current;
+    if (state.timer) return;
+    if (state.attempts >= MAX_AUTO_RECOVERIES) {
+      setVideoError('Preview stream failed to load. Use Reload preview to try again — cut points can still be edited.');
+      return;
+    }
+    state.attempts += 1;
+    setVideoError(`Preview stream interrupted — reconnecting (attempt ${state.attempts} of ${MAX_AUTO_RECOVERIES})…`);
+    const hls = hlsRef.current;
+    if (kind === 'media' && hls && state.attempts <= 2) {
+      hls.recoverMediaError();
+      setTimeout(() => setVideoError(null), 1500);
+      return;
+    }
+    state.timer = setTimeout(() => {
+      state.timer = null;
+      setVideoError(null);
+      if (usingHlsRef.current) attachHls(positionRef.current);
+      else attachDirect(positionRef.current);
+    }, Math.min(1000 * state.attempts, 5000));
+  }, [attachHls, attachDirect]);
+  recoverRef.current = recoverStream;
+
+  const reloadPreview = () => {
+    clearRecoveryTimer();
+    recoveryRef.current.attempts = 0;
+    directRetriedRef.current = false;
+    setVideoError(null);
+    if (usingHlsRef.current || preferHls || !media?.directUrl) attachHls(positionRef.current);
+    else attachDirect(positionRef.current);
+  };
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !media) return undefined;
     setVideoError(null);
-    if (preferHls && attachHls()) {
+    recoveryRef.current.attempts = 0;
+    directRetriedRef.current = false;
+    positionRef.current = 0;
+    wasPlayingRef.current = false;
+    if (preferHls && attachHls(0)) {
       // Transcoded source (AVI/WMV etc.)
     } else if (media.directUrl) {
-      setUsingHls(false);
-      video.src = media.directUrl;
+      attachDirect(0);
     }
     return () => {
+      clearRecoveryTimer();
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };
-  }, [media, preferHls, attachHls]);
+  }, [media, preferHls, attachHls, attachDirect]);
 
-  const handleVideoError = () => {
-    if (!usingHls && attachHls()) return;
+  const handleVideoError = (e) => {
+    const code = e.currentTarget.error?.code;
+    if (usingHlsRef.current) {
+      // hls.js reports its own fatal errors; native HLS (Safari) lands here
+      if (!hlsRef.current) recoverStream('network');
+      return;
+    }
+    // A network/decode hiccup on the direct stream gets one retry before switching to the transcoded stream
+    if (code !== 4 && !directRetriedRef.current && media?.directUrl) {
+      directRetriedRef.current = true;
+      attachDirect(positionRef.current);
+      return;
+    }
+    if (attachHls(positionRef.current)) return;
     setVideoError('This file can\'t be previewed in the browser. Cut points can still be edited.');
+  };
+
+  const trackPosition = (video) => {
+    if (!pendingResumeRef.current) positionRef.current = video.currentTime;
+    setCurrentTime(video.currentTime);
   };
 
   // ---- Sprite thumbnails ----
@@ -543,12 +660,25 @@ export default function SplitTimeline({
               controls
               preload="metadata"
               playsInline
-              onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-              onSeeked={(e) => setCurrentTime(e.currentTarget.currentTime)}
+              onTimeUpdate={(e) => trackPosition(e.currentTarget)}
+              onSeeking={(e) => { if (!pendingResumeRef.current) positionRef.current = e.currentTarget.currentTime; }}
+              onSeeked={(e) => trackPosition(e.currentTarget)}
+              onPlay={() => { wasPlayingRef.current = true; }}
+              onPause={(e) => { if (!recoveryRef.current.timer && !pendingResumeRef.current && !e.currentTarget.error) wasPlayingRef.current = false; }}
+              onPlaying={() => { if (!usingHlsRef.current) recoveryRef.current.attempts = 0; }}
               onError={handleVideoError}
             />
-            {videoError && <div className="stl-video-error">{videoError}</div>}
-            <div className="stl-muted">{usingHls ? 'Transcoded preview (HLS)' : 'Direct preview'} · {formatPreciseClock(currentTime)}</div>
+            {videoError && (
+              <div className="stl-video-error">
+                {videoError}
+                <button type="button" className="stl-btn" onClick={reloadPreview}>↻ Reload preview</button>
+              </div>
+            )}
+            <div className="stl-muted">
+              {usingHls ? 'Transcoded preview (HLS)' : 'Direct preview'} · {formatPreciseClock(currentTime)}
+              {' · '}
+              <button type="button" className="stl-link-btn" onClick={reloadPreview} title="Reload the preview stream at the current position">↻ Reload</button>
+            </div>
           </div>
         )}
         <div className="stl-panel">
@@ -773,7 +903,9 @@ export default function SplitTimeline({
         .stl-top:has(> .stl-panel:only-child) { grid-template-columns: 1fr; }
         .stl-video-wrap { position: relative; }
         .stl-video { width: 100%; max-height: 320px; background: #000; border-radius: 0.375rem; display: block; }
-        .stl-video-error { position: absolute; inset: 0 0 1.5rem 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 1rem; color: #fff; background: rgba(0,0,0,0.7); border-radius: 0.375rem; font-size: 0.9rem; }
+        .stl-video-error { position: absolute; inset: 0 0 1.5rem 0; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: center; text-align: center; padding: 1rem; color: #fff; background: rgba(0,0,0,0.7); border-radius: 0.375rem; font-size: 0.9rem; }
+        .stl-video-error .stl-btn { color: #111827; background: #fff; }
+        .stl-link-btn { padding: 0; border: none; background: none; color: #2563eb; cursor: pointer; font-size: inherit; text-decoration: underline; }
         .stl-panel { display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.9rem; }
         .stl-panel-title { font-size: 1.05rem; }
         .stl-muted { color: #6b7280; font-size: 0.8rem; }
