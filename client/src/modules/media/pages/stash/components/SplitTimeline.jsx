@@ -273,12 +273,13 @@ export default function SplitTimeline({
     setVideoError(null);
     recoveryRef.current.attempts = 0;
     directRetriedRef.current = false;
-    positionRef.current = 0;
+    // Keep the playhead when the source changes (e.g. the transcoded stream is swapped for the converted MP4)
+    const startAt = positionRef.current || 0;
     wasPlayingRef.current = false;
-    if (preferHls && attachHls(0)) {
+    if (preferHls && attachHls(startAt)) {
       // Transcoded source (AVI/WMV etc.)
     } else if (media.directUrl) {
-      attachDirect(0);
+      attachDirect(startAt);
     }
     return () => {
       clearRecoveryTimer();

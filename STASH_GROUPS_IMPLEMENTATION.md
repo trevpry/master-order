@@ -186,7 +186,7 @@ On GroupDetail each scene card has **✂️ Split into Scenes**. It turns a full
    - Per scene it merges AEBN performers/tags with GEVI scene performers (action codes), details and episode URL, then matches them to the library.
    - The modal lets you edit start/end times, titles, performers and tags, and skip scenes.
    - **Visual cut editor** (`components/SplitTimeline.jsx`): the preview's `source.media` holds `{directUrl, hlsUrl, vttUrl, screenshotUrl}`, taken from Stash `paths`.
-     - The video player tries the direct stream first; AVI/WMV start on Stash's transcoded HLS (`stream.m3u8?resolution=STANDARD`).
+     - The video player tries the direct stream first; AVI/WMV start on Stash's transcoded HLS (`stream.m3u8?resolution=STANDARD`) and switch to the server's converted MP4 (keeping the playhead) once the whole-clip conversion finishes.
      - The timeline shows colored scene blocks over a sprite filmstrip from the VTT, plus a dotted marker at each AEBN length. Skipped scenes are hatched and invalid ones are outlined in red.
      - Drag a yellow cut handle to move it; dragging seeks the video. A shared boundary moves the end of one scene and the start of the next together.
      - With a cut selected you can nudge it (±0.1/1/5s, or ←/→, Shift = 5s, Alt = 0.1s), set it to the current video time, preview it from 5s before, or step to the previous/next cut.
@@ -208,8 +208,10 @@ On GroupDetail each scene card has **✂️ Split into Scenes**. It turns a full
 2. **Job:** `POST /api/stash/groups/:id/split {sceneId, segments, studioId?, originalAction: unlink|keep|delete, forceTranscode?}` queues an in-memory job; jobs run one at a time.
    - **Cut:** ffmpeg writes `"<file> - Scene NN.mp4"` next to the source.
      - MP4/MOV/MKV with H.264/HEVC + AAC/MP3 is stream-copied (fast and lossless, but cuts snap to keyframes).
-     - AVI, WMV and other codecs are converted to MP4 (libx264 + AAC). Tune with `SPLIT_X264_PRESET` (default `veryfast`) and `SPLIT_X264_CRF` (default `20`).
-     - "Re-encode for frame-accurate cuts" forces conversion.
+     - AVI, WMV and other codecs are **converted first, then split**: the whole clip is converted once to a temporary MP4 next to the source (`<stem>.mo-converted.tmp`, written as `.part` first; Stash doesn't scan either). It uses the quality settings below plus an IDR keyframe every second (`-force_key_frames expr:gte(t,n_forced*1) -forced-idr 1`). The scenes are then stream-copied from it, landing within 1s of each cut. The temp file is deleted once the cuts are written and kept after a failed cut so a retry can reuse it.
+       - The split dialog starts the conversion as soon as the plan loads: `POST /api/stash/groups/:id/split/convert {sceneId}`. Poll `GET …/split/convert/:sceneId` (`{status: none|queued|running|ready|failed|cancelled|discarded, progress, encoding}`); `POST …/split/convert/:sceneId/cancel` stops it or deletes a finished file. Conversions run one at a time; a split started meanwhile waits for it (job progress 0–60%).
+       - Once ready, the preview plays the converted file (`GET …/split/convert/:sceneId/video`, HTTP Range) instead of Stash's transcoded HLS, and black-frame scans read it too. After a server restart, a converted file that's newer than and as long as the source (±2s) is reused.
+     - "Re-encode for frame-accurate cuts" (MP4-friendly sources only) re-encodes each scene individually.
    - **Scan:** Stash `metadataScan` on the new paths (covers and phashes).
    - **Apply:** title, details, date, URLs, studio, performers, tags, cover image and group membership (`scene_index` = AEBN scene number). The job then syncs locally, applies action-code tags, and generates previews/sprites in the background.
    - **Original:** `unlink` (default) removes the full movie from the group, `keep` leaves it, and `delete` destroys the scene and its file. Unlink and delete only happen if every scene succeeded.

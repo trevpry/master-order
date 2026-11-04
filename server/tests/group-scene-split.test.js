@@ -166,10 +166,10 @@ async function waitForJob(id) {
 }
 
 for (const variant of [
-  { ext: 'mp4', args: ['-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac'], file: { video_codec: 'h264', audio_codec: 'aac' }, transcode: false, audio: 'aac' },
+  { ext: 'mp4', args: ['-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac'], file: { video_codec: 'h264', audio_codec: 'aac' }, convert: false, audio: 'aac' },
   // MP3 audio is copied untouched even though the MPEG-4 ASP video is converted
-  { ext: 'avi', args: ['-c:v', 'mpeg4', '-c:a', 'libmp3lame'], file: { video_codec: 'mpeg4', audio_codec: 'mp3' }, transcode: true, audio: 'mp3' },
-  { ext: 'wmv', args: ['-c:v', 'wmv2', '-c:a', 'wmav2', '-b:a', '64k'], file: { video_codec: 'wmv2', audio_codec: 'wmav2' }, transcode: true, audio: 'aac' }
+  { ext: 'avi', args: ['-c:v', 'mpeg4', '-c:a', 'libmp3lame'], file: { video_codec: 'mpeg4', audio_codec: 'mp3' }, convert: true, audio: 'mp3' },
+  { ext: 'wmv', args: ['-c:v', 'wmv2', '-c:a', 'wmav2', '-b:a', '64k'], file: { video_codec: 'wmv2', audio_codec: 'wmav2' }, convert: true, audio: 'aac' }
 ]) {
   test(`split job cuts a ${variant.ext.toUpperCase()} movie into MP4 scenes and applies metadata`, { skip: !ffmpegPath || !ffprobePath, timeout: 120000 }, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'split-test-'));
@@ -194,7 +194,9 @@ for (const variant of [
           { number: 2, start: 5, end: 12, title: 'Second', performers: [{ id: 'p2' }], tags: [] }
         ]
       });
-      assert.strictEqual(job.transcode, variant.transcode);
+      // Incompatible sources are converted once as a whole, then cut by stream copy
+      assert.strictEqual(job.transcode, false);
+      assert.strictEqual(job.convertFirst, variant.convert);
 
       const done = await waitForJob(job.id);
       assert.strictEqual(done.status, 'completed', done.error || done.log.join('\n'));
@@ -204,11 +206,12 @@ for (const variant of [
       assert.strictEqual(probes[0].video, 'h264');
       assert.strictEqual(probes[0].audio, variant.audio);
       assert.deepStrictEqual([probes[0].width, probes[0].height], [320, 240]);
-      if (variant.ext === 'wmv') assert.match(done.encoding, /H\.264 CRF 16 \(medium\); wmav2 → AAC \d{3}k/);
+      if (variant.ext === 'wmv') assert.match(done.encoding, /^Converted once: H\.264 CRF 16 \(medium\); wmav2 → AAC \d{3}k; scenes cut by lossless stream copy$/);
       if (variant.ext === 'avi') assert.match(done.encoding, /mp3 copied/);
+      if (variant.convert) assert.ok(done.log.some(l => /Converting full scene to MP4/.test(l)), done.log.join('\n'));
       assert.ok(Math.abs(probes[0].duration - 5) < 1.2, `scene 1 duration ${probes[0].duration}`);
       assert.ok(Math.abs(probes[1].duration - 7) < 1.2, `scene 2 duration ${probes[1].duration}`);
-      assert.deepStrictEqual(fs.readdirSync(path.join(root, 'movies')).filter(n => n.endsWith('.part')), []);
+      assert.deepStrictEqual(fs.readdirSync(path.join(root, 'movies')).filter(n => n.endsWith('.part') || n.endsWith('.tmp')), []);
 
       const scan = calls.find(c => c.op === 'SplitScan');
       assert.deepStrictEqual(scan.variables.input.paths, ['/data/movies/Full Movie - Scene 01.mp4', '/data/movies/Full Movie - Scene 02.mp4']);
@@ -229,6 +232,59 @@ for (const variant of [
     }
   });
 }
+
+test('a clip converted ahead of the split is streamed for the preview and reused by the split', { skip: !ffmpegPath || !ffprobePath, timeout: 120000 }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'split-convert-'));
+  const prevMap = process.env.STASH_PATH_MAP;
+  process.env.STASH_PATH_MAP = `/data=${root}`;
+  try {
+    const source = path.join(root, 'Clip.avi');
+    execFileSync(ffmpegPath, ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=duration=10:size=320x240:rate=25',
+      '-f', 'lavfi', '-i', 'sine=duration=10', '-c:v', 'mpeg4', '-g', '250', '-c:a', 'libmp3lame', '-shortest', source]);
+    const file = { id: 'f1', basename: 'Clip.avi', duration: 10, video_codec: 'mpeg4', audio_codec: 'mp3' };
+    const { graphql } = fakeStash('/data/Clip.avi', file);
+    const deps = { prisma: fakePrisma(), graphql, ffmpegPath, ffprobePath, pollIntervalMs: 10 };
+
+    const started = await split.startConversion(deps, '7', { sceneId: '55' });
+    assert.ok(['queued', 'running'].includes(started.status));
+    let conv = started;
+    for (let i = 0; i < 600 && ['queued', 'running'].includes(conv.status); i++) {
+      await new Promise(r => setTimeout(r, 100));
+      conv = await split.getConversion(deps, '7', '55');
+    }
+    assert.strictEqual(conv.status, 'ready', conv.error);
+    assert.match(conv.encoding, /H\.264 CRF 16/);
+
+    const convertedFile = await split.getConvertedFile(deps, '7', '55');
+    assert.strictEqual(convertedFile, path.resolve(split.convertedPathFor(source)));
+    const converted = probe(convertedFile);
+    assert.strictEqual(converted.video, 'h264');
+    assert.ok(Math.abs(converted.duration - 10) < 0.5);
+    // A keyframe every second, so stream-copy cuts land within a second of the cut point
+    const keyframes = execFileSync(ffprobePath, ['-v', 'error', '-select_streams', 'v', '-skip_frame', 'nokey', '-show_entries', 'frame=pts_time', '-of', 'csv=p=0', convertedFile])
+      .toString().trim().split(/\r?\n/).map(Number);
+    assert.ok(keyframes.length >= 9, `keyframes: ${keyframes}`);
+
+    const plan = await split.buildSplitPlan(deps, { groupId: '7', sceneId: '55', aebnUrl: null, geviUrl: null, offset: 0 }).catch(() => null);
+    if (plan) assert.strictEqual(plan.conversion.status, 'ready');
+
+    const job = await split.startSplitJob(deps, '7', {
+      sceneId: '55',
+      originalAction: 'keep',
+      segments: [{ number: 1, start: 0, end: 3.5 }, { number: 2, start: 3.5, end: 10 }]
+    });
+    const done = await waitForJob(job.id);
+    assert.strictEqual(done.status, 'completed', done.error || done.log.join('\n'));
+    assert.ok(done.log.some(l => /Using the already converted MP4/.test(l)), done.log.join('\n'));
+    const first = probe(path.join(root, 'Clip - Scene 01.mp4'));
+    assert.ok(Math.abs(first.duration - 3.5) < 1.1, `scene 1 duration ${first.duration}`);
+    assert.strictEqual(fs.existsSync(convertedFile), false);
+    assert.strictEqual(fs.existsSync(source), true);
+  } finally {
+    if (prevMap === undefined) delete process.env.STASH_PATH_MAP; else process.env.STASH_PATH_MAP = prevMap;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('a failed cut removes the files the job wrote and leaves Stash untouched', { skip: !ffmpegPath, timeout: 60000 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'split-fail-'));

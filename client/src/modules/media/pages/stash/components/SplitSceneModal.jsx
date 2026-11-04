@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import config from '../../../../../config';
 import SplitTimeline, { formatPreciseClock } from './SplitTimeline';
 import { insertCuts, newSegmentUid, removeCut } from './splitSegmentEdits';
@@ -52,12 +52,66 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
   const [forceTranscode, setForceTranscode] = useState(false);
   const [starting, setStarting] = useState(false);
   const [job, setJob] = useState(null);
+  const [conversion, setConversion] = useState(null);
   const pollRef = useRef(null);
+  const convPollRef = useRef(null);
   const finishedRef = useRef(false);
 
   const stopPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = null;
+  };
+
+  const stopConversionPolling = () => {
+    if (convPollRef.current) clearInterval(convPollRef.current);
+    convPollRef.current = null;
+  };
+
+  const conversionUrl = `${api}/groups/${groupId}/split/convert/${scene.id}`;
+
+  const pollConversion = useCallback(() => {
+    stopConversionPolling();
+    const tick = async () => {
+      try {
+        const res = await fetch(conversionUrl);
+        const data = await res.json();
+        if (!data.success) return;
+        setConversion(data.data);
+        if (!ACTIVE.includes(data.data.status)) stopConversionPolling();
+      } catch {
+        // Transient network error; keep polling
+      }
+    };
+    convPollRef.current = setInterval(tick, 3000);
+  }, [conversionUrl]);
+
+  const startConversion = useCallback(async () => {
+    try {
+      const res = await fetch(`${api}/groups/${groupId}/split/convert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sceneId: scene.id })
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setConversion(prev => ({ ...(prev || {}), status: 'failed', error: data.error || 'Could not start the conversion' }));
+        return;
+      }
+      setConversion(data.data);
+      if (ACTIVE.includes(data.data.status)) pollConversion();
+    } catch (e) {
+      setConversion(prev => ({ ...(prev || {}), status: 'failed', error: e.message }));
+    }
+  }, [api, groupId, scene.id, pollConversion]);
+
+  const cancelConversion = async () => {
+    try {
+      const res = await fetch(`${conversionUrl}/cancel`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) setConversion(data.data);
+    } catch {
+      // Status poll picks up the change
+    }
   };
 
   const pollJob = useCallback((jobId) => {
@@ -138,9 +192,32 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
     return () => {
       cancelled = true;
       stopPolling();
+      stopConversionPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Clips MP4 can't hold are converted once on the server; start (or follow) that as soon as the plan is loaded
+  useEffect(() => {
+    stopConversionPolling();
+    if (!plan?.transcodeReason) {
+      setConversion(null);
+      return;
+    }
+    const current = plan.conversion || { status: 'none' };
+    setConversion(current);
+    if (ACTIVE.includes(current.status)) pollConversion();
+    else if (current.status === 'none' && plan.ffmpegAvailable && plan.fileAccess?.readable && plan.fileAccess?.writable) startConversion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
+
+  const conversionReady = conversion?.status === 'ready';
+  const previewMedia = useMemo(() => {
+    if (!plan) return null;
+    if (!conversionReady) return plan.source.media;
+    return { ...plan.source.media, directUrl: `${conversionUrl}/video?v=${encodeURIComponent(conversion?.finishedAt || 'ready')}` };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, conversionReady, conversionUrl]);
 
   const updateSegment = (index, patch) => {
     setSegments(prev => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
@@ -262,7 +339,7 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
               <span>{job.step}</span>
             </div>
             <div className="ssm-progress"><div style={{ width: `${Math.round(job.progress || 0)}%` }} /></div>
-            {job.transcodeReason && <p className="ssm-note">🔄 {job.transcodeReason} — scenes are converted to MP4{job.encoding ? ` (${job.encoding})` : ''}.</p>}
+            {job.transcodeReason && <p className="ssm-note">🔄 {job.transcodeReason} — {job.convertFirst ? 'the whole clip is converted to MP4 once, then split by lossless stream copy' : 'scenes are re-encoded'}{job.encoding ? ` (${job.encoding})` : ''}.</p>}
             {job.error && <p className="ssm-error">{job.error}</p>}
             <table className="ssm-table">
               <thead><tr><th>#</th><th>Time</th><th>Title</th><th>Status</th></tr></thead>
@@ -326,7 +403,30 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                   </div>
                 </div>
                 {plan.transcodeReason
-                  ? <p className="ssm-note">🔄 {plan.transcodeReason} — each scene will be converted to MP4 at near-source quality (same resolution, frame rate and audio tracks; MP4-compatible audio is copied untouched). This takes a while.</p>
+                  ? (
+                    <div className="ssm-convert">
+                      <p className="ssm-note">🔄 {plan.transcodeReason} — the whole clip is first converted to MP4 once at near-source quality (same resolution, frame rate and audio tracks; MP4-compatible audio is copied untouched). The preview switches to the converted file when it's ready, and the scenes are then cut from it without any further re-encoding.</p>
+                      {conversion && ACTIVE.includes(conversion.status) && (
+                        <>
+                          <div className="ssm-job-status">
+                            <span>⏳ {conversion.status === 'queued' ? 'Conversion queued…' : `Converting to MP4… ${Math.round(conversion.progress || 0)}%`}{conversion.encoding ? ` · ${conversion.encoding}` : ''}</span>
+                            <button className="ssm-btn ssm-btn-danger" onClick={cancelConversion}>Cancel conversion</button>
+                          </div>
+                          <div className="ssm-progress"><div style={{ width: `${Math.round(conversion.progress || 0)}%` }} /></div>
+                          <p className="ssm-note">You can set the cut points (on the transcoded preview) and start the split now; it waits for the conversion to finish.</p>
+                        </>
+                      )}
+                      {conversionReady && (
+                        <p className="ssm-note">✅ Converted to MP4{conversion.encoding ? ` (${conversion.encoding})` : ''}. The preview plays the converted file; splitting is a lossless stream copy.</p>
+                      )}
+                      {conversion && ['failed', 'cancelled', 'discarded', 'none'].includes(conversion.status) && plan.ffmpegAvailable && plan.fileAccess?.readable && plan.fileAccess?.writable && (
+                        <div className="ssm-job-status">
+                          {conversion.error && <span className="ssm-error-small">Conversion failed: {conversion.error}</span>}
+                          <button className="ssm-btn" onClick={startConversion}>{conversion.status === 'none' ? 'Convert now' : 'Retry conversion'}</button>
+                        </div>
+                      )}
+                    </div>
+                  )
                   : (
                     <label className="ssm-check">
                       <input type="checkbox" checked={forceTranscode} onChange={(e) => setForceTranscode(e.target.checked)} />
@@ -346,8 +446,8 @@ export default function SplitSceneModal({ groupId, scene, onClose, onFinished })
                   duration={plan.source.duration}
                   segments={segments}
                   errors={segmentErrors}
-                  media={plan.source.media}
-                  preferHls={Boolean(plan.transcodeReason)}
+                  media={previewMedia}
+                  preferHls={Boolean(plan.transcodeReason) && !conversionReady}
                   parseClock={parseClock}
                   onSetTimes={setCutTimes}
                   onInsertCuts={insertCutsAt}

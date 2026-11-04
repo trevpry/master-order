@@ -4475,6 +4475,51 @@ router.post('/groups/:id/split', asyncHandler(async (req, res) => {
   }
 }));
 
+// POST /api/stash/groups/:id/split/convert { sceneId } - Convert a non-MP4-compatible clip to MP4 before splitting
+router.post('/groups/:id/split/convert', asyncHandler(async (req, res) => {
+  try {
+    sendSuccess(res, await groupSceneSplit.startConversion(await splitDeps(), req.params.id, req.body || {}));
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+}));
+
+// GET /api/stash/groups/:id/split/convert/:sceneId - Conversion progress
+router.get('/groups/:id/split/convert/:sceneId', asyncHandler(async (req, res) => {
+  try {
+    const conversion = await groupSceneSplit.getConversion(await splitDeps(), req.params.id, req.params.sceneId);
+    if (!conversion) return sendNotFound(res, 'Conversion not found');
+    sendSuccess(res, conversion);
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+}));
+
+// POST /api/stash/groups/:id/split/convert/:sceneId/cancel - Stop a conversion or delete the converted file
+router.post('/groups/:id/split/convert/:sceneId/cancel', asyncHandler(async (req, res) => {
+  try {
+    sendSuccess(res, groupSceneSplit.cancelConversion(req.params.sceneId));
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+}));
+
+// GET /api/stash/groups/:id/split/convert/:sceneId/video - Stream the converted MP4 (Range requests) for the preview
+router.get('/groups/:id/split/convert/:sceneId/video', asyncHandler(async (req, res) => {
+  let filePath;
+  try {
+    filePath = await groupSceneSplit.getConvertedFile(await splitDeps(), req.params.id, req.params.sceneId);
+  } catch (error) {
+    return sendSplitError(res, error);
+  }
+  if (!filePath) return sendNotFound(res, 'Converted file not found');
+  res.type('video/mp4');
+  res.sendFile(filePath, { dotfiles: 'allow', acceptRanges: true, cacheControl: false }, (err) => {
+    // Seeking aborts in-flight range requests; only report errors nothing has been sent for
+    if (err && !res.headersSent) sendNotFound(res, 'Converted file could not be read');
+  });
+}));
+
 // POST /api/stash/groups/:id/split/black-frames { sceneId, cuts?, window?, fullScan? } - Start a blackdetect scan for cut suggestions
 router.post('/groups/:id/split/black-frames', asyncHandler(async (req, res) => {
   try {

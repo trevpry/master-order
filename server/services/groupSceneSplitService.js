@@ -227,13 +227,20 @@ function planEncoding({ transcode, media = {}, encoders = new Set(), env = proce
   return { mode: 'transcode', hevc: useX265, video, audio, summary: `${videoSummary}; ${audioSummary}` };
 }
 
-function buildFfmpegArgs({ input, output, start, end, transcode, hevc = false, plan = null }) {
+/**
+ * ffmpeg arguments for one cut (start/end) or, when start is null, the whole file. keyframeSeconds forces an IDR
+ * frame every N seconds so later stream-copy cuts of the output land within N seconds of the requested time.
+ */
+function buildFfmpegArgs({ input, output, start, end, transcode, hevc = false, plan = null, keyframeSeconds = null }) {
   const encoding = plan || planEncoding({ transcode, media: { video: { codec: hevc ? 'hevc' : '' }, audio: [] } });
-  const args = ['-hide_banner', '-nostdin', '-y', '-ss', String(start), '-i', input, '-t', String(round(end - start))];
+  const args = start === null || start === undefined
+    ? ['-hide_banner', '-nostdin', '-y', '-i', input]
+    : ['-hide_banner', '-nostdin', '-y', '-ss', String(start), '-i', input, '-t', String(round(end - start))];
   if (encoding.mode === 'transcode') {
     const { video, audio } = encoding;
     args.push('-map', '0:v:0', '-map', '0:a?', '-map_metadata', '0', '-map_chapters', '-1');
     args.push('-c:v', video.encoder, '-preset', video.preset, '-crf', video.crf, '-pix_fmt', video.pixFmt);
+    if (keyframeSeconds) args.push('-force_key_frames', `expr:gte(t,n_forced*${keyframeSeconds})`, '-forced-idr', '1');
     if (video.encoder === 'libx265') args.push('-x265-params', 'log-level=error');
     if (video.tag) args.push('-tag:v', video.tag);
     if (video.evenScale) args.push('-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos');
@@ -552,6 +559,14 @@ async function finishPlan(deps, { group, scene, file, aebnUrl, geviUrl, warnings
       blackFrames = null;
     }
   }
+  const reason = transcodeReason(file);
+  const fileAccess = await checkFileAccess(localPath, deps.fs || fs);
+  let conversion = null;
+  if (reason) {
+    conversion = fileAccess.readable
+      ? await conversionStatus(deps, { groupId: String(group.id), sceneId: String(scene.id), file, localSource: localPath })
+      : { needed: true, status: 'none', progress: 0 };
+  }
   return {
     group: { id: String(group.id), name: group.name },
     mode,
@@ -572,9 +587,10 @@ async function finishPlan(deps, { group, scene, file, aebnUrl, geviUrl, warnings
     aebnUrl,
     geviUrl,
     studio: studio || group.studio || scene.studio || null,
-    transcodeReason: transcodeReason(file),
+    transcodeReason: reason,
+    conversion,
     ffmpegAvailable: Boolean(deps.ffmpegPath),
-    fileAccess: await checkFileAccess(localPath, deps.fs || fs),
+    fileAccess,
     blackFrames,
     warnings,
     segments
@@ -656,7 +672,9 @@ async function startSplitJob(deps, groupId, body) {
   if (!access.readable || !access.writable) throw new SplitError(access.error, 400, 'NO_FILE_ACCESS');
 
   const reason = transcodeReason(file);
-  const transcode = Boolean(reason) || Boolean(body.forceTranscode);
+  // Incompatible sources are converted to MP4 once as a whole, then split from the converted file by stream copy
+  const convertFirst = Boolean(reason);
+  const transcode = !convertFirst && Boolean(body.forceTranscode);
   const job = {
     id: crypto.randomUUID(),
     groupId: String(group.id),
@@ -664,6 +682,7 @@ async function startSplitJob(deps, groupId, body) {
     sceneId,
     originalAction,
     transcode,
+    convertFirst,
     transcodeReason: reason || (body.forceTranscode ? 'Re-encoding for frame-accurate cuts' : null),
     status: 'queued',
     step: 'Waiting',
@@ -724,13 +743,43 @@ async function executeSplitJob(deps, job) {
     try { sourceStat = await fsImpl.promises.stat(localSource); } catch { /* ownership copy is best effort */ }
     const dir = path.dirname(localSource);
 
-    const [media, encoders] = await Promise.all([
-      probeSourceMedia(deps.ffprobePath, localSource, file),
-      job.transcode ? availableEncoders(ffmpegPath) : Promise.resolve(new Set())
-    ]);
-    const plan = planEncoding({ transcode: job.transcode, media, encoders });
-    job.encoding = plan.summary;
-    log(job, `Encoding: ${plan.summary}${media.probed ? '' : ' (source not probed; using Stash file info)'}`);
+    let cutSource = localSource;
+    let cutBase = 0;
+    let plan;
+    if (job.convertFirst) {
+      const conv = await ensureConversion(deps, { groupId: job.groupId, sceneId: job.sceneId, file, localSource });
+      if (conv.status === 'ready') {
+        log(job, `Using the already converted MP4 (${conv.encoding || 'converted earlier'})`);
+      } else {
+        job.step = 'Converting full scene to MP4';
+        job.awaitingConversion = true;
+        log(job, `${job.step} (${job.transcodeReason}) before splitting`);
+        const ticker = setInterval(() => { job.progress = Math.round((conv.progress || 0) * 0.6); }, 500);
+        try {
+          await conv.promise;
+        } finally {
+          clearInterval(ticker);
+          job.awaitingConversion = false;
+        }
+        if (job.cancelRequested) throw new Error('Cancelled');
+        if (conv.status !== 'ready') throw new Error(`Conversion failed: ${conv.error || conv.status}`);
+        log(job, `Converted: ${conv.encoding}`);
+      }
+      cutSource = conv.convertedPath;
+      cutBase = 60;
+      job.progress = cutBase;
+      plan = planEncoding({ transcode: false, media: { video: { codec: conv.hevc ? 'hevc' : 'h264' } } });
+      job.encoding = `${conv.encoding ? `Converted once: ${conv.encoding}` : 'Converted once'}; scenes cut by lossless stream copy`;
+      log(job, `Encoding: ${job.encoding}`);
+    } else {
+      const [media, encoders] = await Promise.all([
+        probeSourceMedia(deps.ffprobePath, localSource, file),
+        job.transcode ? availableEncoders(ffmpegPath) : Promise.resolve(new Set())
+      ]);
+      plan = planEncoding({ transcode: job.transcode, media, encoders });
+      job.encoding = plan.summary;
+      log(job, `Encoding: ${plan.summary}${media.probed ? '' : ' (source not probed; using Stash file info)'}`);
+    }
 
     for (const seg of job.segments) {
       if (job.cancelRequested) throw new Error('Cancelled');
@@ -742,7 +791,7 @@ async function executeSplitJob(deps, job) {
       log(job, `${job.step}: ${formatClock(seg.start)}–${formatClock(seg.end)} → ${path.basename(finalPath)}`);
 
       await runFfmpeg(ffmpegPath, buildFfmpegArgs({
-        input: localSource,
+        input: cutSource,
         output: partPath,
         start: seg.start,
         end: seg.end,
@@ -752,7 +801,7 @@ async function executeSplitJob(deps, job) {
         job,
         onProgress: seconds => {
           const len = seg.end - seg.start;
-          job.progress = Math.min(80, Math.round(((cutDone + Math.min(seconds, len)) / totalCut) * 80));
+          job.progress = Math.min(80, cutBase + Math.round(((cutDone + Math.min(seconds, len)) / totalCut) * (80 - cutBase)));
         }
       });
 
@@ -768,6 +817,10 @@ async function executeSplitJob(deps, job) {
     }
     job.progress = 80;
     cutting = false;
+    if (job.convertFirst) {
+      await discardConversion(deps, job.sceneId);
+      log(job, 'Removed the temporary converted MP4');
+    }
 
     // 2. Scan the new files into Stash
     job.step = 'Scanning new files in Stash';
@@ -897,6 +950,213 @@ function formatClock(seconds) {
 
 function getJob(jobId) {
   return publicJob(jobs.get(jobId));
+}
+
+// ---------------------------------------------------------------------------
+// Whole-scene conversion: sources MP4 can't hold (WMV, AVI, ...) are converted once, at near-source quality and
+// with a keyframe every second, into a temporary MP4 next to the original. The preview plays that file and the
+// split cuts it by stream copy, so the scenes aren't each re-encoded from the original or from a transcoded stream.
+// ---------------------------------------------------------------------------
+
+const CONVERT_KEYFRAME_SECONDS = 1;
+const CONVERTED_SUFFIX = '.mo-converted.tmp';
+const conversions = new Map();
+let conversionQueue = Promise.resolve();
+
+function convertedPathFor(localSource) {
+  const stem = path.basename(localSource).replace(/\.[^.]+$/, '');
+  return path.join(path.dirname(localSource), `${stem}${CONVERTED_SUFFIX}`);
+}
+
+function publicConversion(conv) {
+  if (!conv) return null;
+  return {
+    needed: true,
+    sceneId: conv.sceneId,
+    groupId: conv.groupId,
+    status: conv.status,
+    progress: conv.progress,
+    error: conv.error || null,
+    encoding: conv.encoding || null,
+    startedAt: conv.startedAt || null,
+    finishedAt: conv.finishedAt || null
+  };
+}
+
+async function probeConverted(ffprobePath, filePath) {
+  if (!ffprobePath) return null;
+  const out = await runCapture(ffprobePath, ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', filePath]);
+  try {
+    const json = out ? JSON.parse(out) : null;
+    if (!json) return null;
+    const video = (json.streams || []).find(s => s.codec_type === 'video');
+    return { duration: Number(json.format?.duration) || 0, videoCodec: String(video?.codec_name || '').toLowerCase() };
+  } catch {
+    return null;
+  }
+}
+
+/** A finished conversion left on disk (e.g. before a server restart) is reused when it's newer than and as long as the source. */
+async function adoptConvertedFile(deps, { groupId, sceneId, file, localSource }) {
+  const fsImpl = deps.fs || fs;
+  const convertedPath = convertedPathFor(localSource);
+  try {
+    const [converted, source] = await Promise.all([fsImpl.promises.stat(convertedPath), fsImpl.promises.stat(localSource)]);
+    if (converted.mtimeMs < source.mtimeMs) return null;
+  } catch {
+    return null;
+  }
+  const info = await probeConverted(deps.ffprobePath, convertedPath);
+  const duration = Number(file.duration) || 0;
+  if (!info || !(info.duration > 0) || (duration > 0 && Math.abs(info.duration - duration) > 2)) return null;
+  const conv = {
+    sceneId, groupId, localSource, convertedPath,
+    status: 'ready', progress: 100, error: null, encoding: null,
+    hevc: /hevc|h265/.test(info.videoCodec),
+    startedAt: null, finishedAt: null, promise: Promise.resolve()
+  };
+  conversions.set(sceneId, conv);
+  return conv;
+}
+
+function liveConversion(deps, sceneId, localSource) {
+  const conv = conversions.get(sceneId);
+  if (!conv || conv.localSource !== localSource) return null;
+  if (['queued', 'running'].includes(conv.status)) return conv;
+  if (conv.status === 'ready' && (deps.fs || fs).existsSync(conv.convertedPath)) return conv;
+  return null;
+}
+
+async function conversionStatus(deps, { groupId, sceneId, file, localSource }) {
+  const conv = liveConversion(deps, sceneId, localSource) || await adoptConvertedFile(deps, { groupId, sceneId, file, localSource });
+  if (conv) return publicConversion(conv);
+  const last = conversions.get(sceneId);
+  if (last && last.localSource === localSource) return publicConversion(last);
+  return { needed: true, sceneId, groupId, status: 'none', progress: 0, error: null, encoding: null };
+}
+
+async function runConversion(deps, conv, file) {
+  const fsImpl = deps.fs || fs;
+  const partPath = `${conv.convertedPath}.part`;
+  if (conv.cancelRequested) {
+    conv.status = 'cancelled';
+    conv.finishedAt = new Date().toISOString();
+    return conv;
+  }
+  conv.status = 'running';
+  conv.startedAt = new Date().toISOString();
+  const duration = Number(file.duration) || 0;
+  try {
+    const [media, encoders] = await Promise.all([
+      probeSourceMedia(deps.ffprobePath, conv.localSource, file),
+      availableEncoders(deps.ffmpegPath)
+    ]);
+    const plan = planEncoding({ transcode: true, media, encoders });
+    conv.encoding = plan.summary;
+    conv.hevc = plan.hevc;
+    console.log(`🔄 Converting scene ${conv.sceneId} to MP4 before splitting: ${plan.summary}`);
+    await runFfmpeg(deps.ffmpegPath, buildFfmpegArgs({
+      input: conv.localSource,
+      output: partPath,
+      start: null,
+      transcode: true,
+      plan,
+      keyframeSeconds: CONVERT_KEYFRAME_SECONDS
+    }), {
+      job: conv,
+      onProgress: seconds => { conv.progress = duration > 0 ? Math.min(99, Math.round((seconds / duration) * 100)) : 0; }
+    });
+    if (conv.cancelRequested) throw new Error('Cancelled');
+    await fsImpl.promises.rename(partPath, conv.convertedPath);
+    conv.status = 'ready';
+    conv.progress = 100;
+    console.log(`🔄 Scene ${conv.sceneId} converted → ${path.basename(conv.convertedPath)}`);
+  } catch (error) {
+    conv.status = conv.cancelRequested ? 'cancelled' : 'failed';
+    conv.error = conv.cancelRequested ? null : error.message;
+    if (!conv.cancelRequested) console.warn(`🔄 Converting scene ${conv.sceneId} failed: ${error.message}`);
+    await fsImpl.promises.unlink(partPath).catch(() => {});
+  } finally {
+    conv.finishedAt = new Date().toISOString();
+  }
+  return conv;
+}
+
+/** Returns the scene's ready or in-progress conversion, starting one (queued, one at a time) when there is none. */
+async function ensureConversion(deps, { groupId, sceneId, file, localSource }) {
+  const existing = liveConversion(deps, sceneId, localSource) || await adoptConvertedFile(deps, { groupId, sceneId, file, localSource });
+  if (existing) return existing;
+  const conv = {
+    sceneId, groupId, localSource,
+    convertedPath: convertedPathFor(localSource),
+    status: 'queued', progress: 0, error: null, encoding: null, hevc: false,
+    startedAt: null, finishedAt: null, child: null, cancelRequested: false
+  };
+  conversions.set(sceneId, conv);
+  conv.promise = conversionQueue = conversionQueue.then(() => runConversion(deps, conv, file)).catch(() => conv);
+  return conv;
+}
+
+/** POST body { sceneId } - convert an incompatible source to MP4 ahead of the split (the preview then plays it). */
+async function startConversion(deps, groupId, body) {
+  const { graphql } = deps;
+  if (!graphql) throw new SplitError('Stash is not configured', 503);
+  if (!deps.ffmpegPath) throw new SplitError('ffmpeg is not installed on the server', 503);
+  const sceneId = String(body?.sceneId || '');
+  if (!sceneId) throw new SplitError('sceneId is required');
+  const { group, file } = await loadStashGroupAndScene(graphql, String(groupId), sceneId);
+  if (!transcodeReason(file)) throw new SplitError('This clip is already MP4-compatible; it is split without converting', 400, 'NO_CONVERSION_NEEDED');
+  const localSource = stashPathToLocal(file.path);
+  const access = await checkFileAccess(localSource, deps.fs || fs);
+  if (!access.readable || !access.writable) throw new SplitError(access.error, 400, 'NO_FILE_ACCESS');
+  return publicConversion(await ensureConversion(deps, { groupId: String(group.id), sceneId, file, localSource }));
+}
+
+async function getConversion(deps, groupId, sceneId) {
+  const conv = conversions.get(String(sceneId));
+  if (conv) return publicConversion(conv);
+  if (!deps.graphql) return null;
+  const { file } = await loadStashGroupAndScene(deps.graphql, String(groupId), String(sceneId));
+  if (!transcodeReason(file)) return { needed: false, sceneId: String(sceneId), status: 'none', progress: 0 };
+  return conversionStatus(deps, { groupId: String(groupId), sceneId: String(sceneId), file, localSource: stashPathToLocal(file.path) });
+}
+
+/** Absolute path of the scene's finished conversion (for streaming to the preview), or null. */
+async function getConvertedFile(deps, groupId, sceneId) {
+  const fsImpl = deps.fs || fs;
+  let conv = conversions.get(String(sceneId));
+  if (!conv && deps.graphql) {
+    const { file } = await loadStashGroupAndScene(deps.graphql, String(groupId), String(sceneId));
+    if (transcodeReason(file)) {
+      conv = await adoptConvertedFile(deps, { groupId: String(groupId), sceneId: String(sceneId), file, localSource: stashPathToLocal(file.path) });
+    }
+  }
+  if (!conv || conv.status !== 'ready' || !fsImpl.existsSync(conv.convertedPath)) return null;
+  return path.resolve(conv.convertedPath);
+}
+
+/** Stop a running conversion, or delete a finished one. */
+function cancelConversion(sceneId) {
+  const conv = conversions.get(String(sceneId));
+  if (!conv) throw new SplitError('No conversion for this scene', 404);
+  if (['queued', 'running'].includes(conv.status)) {
+    conv.cancelRequested = true;
+    if (conv.child) conv.child.kill('SIGKILL');
+    return publicConversion(conv);
+  }
+  if (conv.status === 'ready') {
+    fs.promises.unlink(conv.convertedPath).catch(() => {});
+    conv.status = 'discarded';
+    conv.progress = 0;
+  }
+  return publicConversion(conv);
+}
+
+async function discardConversion(deps, sceneId) {
+  const conv = conversions.get(String(sceneId));
+  if (!conv) return;
+  conversions.delete(String(sceneId));
+  await (deps.fs || fs).promises.unlink(conv.convertedPath).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,7 +1362,8 @@ async function startBlackScan(deps, groupId, body) {
   if (ranges.length === 0 || !(duration > 0)) throw new SplitError('Nothing to scan');
 
   const scan = registerBlackScan({ groupId, sceneId, fullScan, window, ranges });
-  runBlackScan(deps, scan, { localSource, file });
+  const converted = liveConversion(deps, sceneId, localSource);
+  runBlackScan(deps, scan, { localSource: converted?.status === 'ready' ? converted.convertedPath : localSource, file });
   return publicBlackScan(scan);
 }
 
@@ -1161,6 +1422,9 @@ function cancelJob(jobId) {
   }
   job.cancelRequested = true;
   if (job.child) job.child.kill('SIGKILL');
+  if (job.awaitingConversion) {
+    try { cancelConversion(job.sceneId); } catch { /* already finished */ }
+  }
   return publicJob(job);
 }
 
@@ -1186,6 +1450,11 @@ module.exports = {
   getJob,
   listJobs,
   cancelJob,
+  startConversion,
+  getConversion,
+  getConvertedFile,
+  cancelConversion,
+  convertedPathFor,
   blackScanRanges,
   parseBlackdetect,
   mergeBlackIntervals,
