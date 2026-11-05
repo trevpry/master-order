@@ -2236,6 +2236,7 @@ model BackgroundImage {
   filename     String
   originalName String?
   path         String
+  sourcePath   String?
   url          String?
   size         Int?
   mimetype     String?
@@ -2247,12 +2248,14 @@ model BackgroundImage {
   gallery      BackgroundGallery? @relation(fields: [galleryId], references: [id])
 
   @@index([galleryId])
+  @@unique([galleryId, sourcePath])
 }
 
 model BackgroundGallery {
   id           Int               @id @default(autoincrement())
   name         String
   description  String?
+  networkFolderPath String?
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   backgrounds  BackgroundImage[]

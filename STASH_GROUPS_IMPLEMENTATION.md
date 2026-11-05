@@ -240,6 +240,28 @@ When a scene has a title but no performers and no URLs (scene URL, episode URLs 
 - **Matching:** candidates are ranked by title similarity; a different volume number cuts the score. The top 3 at ≥ 60% are scraped as full movies (or as the requested scene). Performers and groups are matched against the database.
 - **Review:** the results appear first in the review modal as "GEVI/AEBN Movie Title Search" sources, with Title match %, ✓ IN DATABASE and ✦ NEW MOVIE badges.
 
+### 12. GEVI Group Scrape Imports Performers into Empty Scenes ✅
+On the group details page, **Scrape GEVI** (`POST /api/stash/gevi/movie` with `groupId`) matches the group's scenes to GEVI scenes. Scenes are passed with their `sceneIndex`, so scenes with no performers are matched by scene number (`matchMovieScenes` PASS 2).
+- **Description:** an empty scene description is filled from the GEVI scene during the scrape, in Stash and locally.
+- **Performers to import:** for matched scenes with **no performers**, `geviSceneImportService.annotatePerformerImports` resolves the GEVI performers against the library using names and aliases (`geviScraper.matchPerformers`). Each match gets `importPerformers` and `performerImports`: one entry per GEVI performer with `{key, scrapedName, url, actionCode, match, alternatives, choice}`. The GEVI scraper records each scene performer's profile `url`.
+  - **Review:** the modal renders `GeviPerformerImportEditor`. As in regular scene scraping, each GEVI performer has a dropdown:
+    - the matched library performer (✓) and its alternatives
+    - 🔍 *Choose another performer…*, an inline library search
+    - ➕ *Add "name" as new performer*
+    - ✕ *Don't import*
+  - **Choices:** `choice` is `{type:'library', id, name}`, `{type:'new', name}` or `{type:'skip'}`. Unmatched performers default to *new*.
+  - **Resolving choices:** `resolvePerformerChoices` turns them into `performersToImport` (`{id, name, scrapedName, actionCode}`) and `performersToCreate` (`{name, url, actionCode, forceNew}`). The scrape also returns both lists for the default choices.
+- **GEVI scene URL:** when accepted, every matched scene whose GEVI scene has its own page (`episodeUrl`, the `/episode/` link) gets that URL via `geviSceneImportService.addSceneUrl`. It is appended to the local `episodeUrls` and merged into the Stash scene's `urls`; existing URLs are kept and duplicates are skipped. The response counts `addedSceneUrls`.
+- **On accept:** `POST /groups/:id/apply-matched-scenes` calls `importScenePerformers`, but only if the scene still has no performers.
+  - The route uses the edited `performerImports` choices when present. It resolves `performersToCreate` with `createMissingPerformers`, which first re-checks the library and then Stash (`findPerformers` name EQUALS), so nobody is duplicated.
+    - The library check matches by name, or also by alias unless the user explicitly chose *new* (`forceNew`).
+    - Library lookups use `contains`, not `mode: 'insensitive'`, which SQLite does not support.
+    - Anyone still missing is created with `performerCreate` (name and GEVI URL) and upserted locally.
+  - It then sets `performer_ids` in Stash for all of them and creates the local links.
+  - Finally it applies the action-code tags and refreshes the group performers.
+  - The response counts `importedPerformers` and `createdPerformers`, and the page shows a summary alert, including any failures, before reloading.
+  - Scenes that already have performers keep the existing behavior: only action codes are applied, to the matching existing performers.
+
 ## Architecture Summary
 
 ### Modularity ✅

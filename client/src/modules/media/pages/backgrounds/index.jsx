@@ -203,21 +203,26 @@ const Backgrounds = () => {
   const [editingGallery, setEditingGallery] = useState(null);
   const [editGalleryName, setEditGalleryName] = useState('');
   const [editGalleryDescription, setEditGalleryDescription] = useState('');
+  const [editGalleryFolderPath, setEditGalleryFolderPath] = useState('');
+  const [galleryUpdateLoading, setGalleryUpdateLoading] = useState(false);
 
   const handleEditGallery = (gallery, event) => {
     event.stopPropagation(); // Prevent gallery selection
     setEditingGallery(gallery);
     setEditGalleryName(gallery.name);
     setEditGalleryDescription(gallery.description || '');
+    setEditGalleryFolderPath(gallery.networkFolderPath || '');
     setShowEditGallery(true);
   };
 
   const handleUpdateGallery = async () => {
+    if (galleryUpdateLoading) return;
     if (!editGalleryName.trim()) {
       toast.error('Please enter a gallery name');
       return;
     }
 
+    setGalleryUpdateLoading(true);
     try {
       const response = await fetch(`${config.apiBaseUrl}/api/background-galleries/${editingGallery.id}`, {
         method: 'PUT',
@@ -226,23 +231,40 @@ const Backgrounds = () => {
         },
         body: JSON.stringify({
           name: editGalleryName.trim(),
-          description: editGalleryDescription.trim()
+          description: editGalleryDescription.trim(),
+          networkFolderPath: editGalleryFolderPath.trim() || null
         })
       });
 
-      if (!response.ok) throw new Error('Failed to update gallery');
-      
-      toast.success('Gallery updated successfully');
-      
-      fetchGalleries(); // Refresh galleries
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || result.error || 'Failed to update gallery');
+
+      await Promise.all([fetchGalleries(), fetchBackgrounds()]);
+      if (selectedGallery?.id === editingGallery.id) {
+        await handleSelectGallery(result.gallery);
+      }
+      if (result.folderImport) {
+        const { stats, errors } = result.folderImport;
+        if (stats.failed > 0) {
+          console.error('Gallery folder import errors:', errors);
+          toast.error(`Gallery saved, but ${stats.failed} images failed to import. ${stats.imported} imported, ${stats.skipped} already assigned. Save again to retry.`);
+          return;
+        }
+        toast.success(`Gallery saved: ${stats.imported} images imported, ${stats.skipped} already assigned`);
+      } else {
+        toast.success('Gallery updated successfully');
+      }
       setShowEditGallery(false);
       setEditingGallery(null);
       setEditGalleryName('');
       setEditGalleryDescription('');
+      setEditGalleryFolderPath('');
       
     } catch (error) {
       console.error('Update gallery error:', error);
-      toast.error('Failed to update gallery');
+      toast.error(error.message);
+    } finally {
+      setGalleryUpdateLoading(false);
     }
   };
 
@@ -525,6 +547,7 @@ const Backgrounds = () => {
                 value={editGalleryName}
                 onChange={(e) => setEditGalleryName(e.target.value)}
                 className="gallery-name-input"
+                disabled={galleryUpdateLoading}
               />
               <textarea
                 placeholder="Gallery description (optional)"
@@ -532,10 +555,27 @@ const Backgrounds = () => {
                 onChange={(e) => setEditGalleryDescription(e.target.value)}
                 className="gallery-description-input"
                 rows="3"
+                disabled={galleryUpdateLoading}
               />
+              <label htmlFor="gallery-network-folder">Network image folder (optional)</label>
+              <input
+                id="gallery-network-folder"
+                type="text"
+                placeholder={'\\\\tower\\Media\\Images\\Gallery'}
+                value={editGalleryFolderPath}
+                onChange={(e) => setEditGalleryFolderPath(e.target.value)}
+                className="gallery-name-input"
+                disabled={galleryUpdateLoading}
+              />
+              <p>
+                Enter a folder accessible to the server, using a network path or a mounted
+                container path. Saving copies all supported images, including subfolders,
+                into this gallery. Existing imports are skipped and original files are
+                left untouched. Clear the path to stop importing; existing images stay.
+              </p>
               <div className="gallery-form-actions">
-                <button onClick={handleUpdateGallery} className="save-btn">
-                  Update
+                <button onClick={handleUpdateGallery} className="save-btn" disabled={galleryUpdateLoading}>
+                  {galleryUpdateLoading ? 'Saving and importing...' : editGalleryFolderPath.trim() ? 'Save and Import Images' : 'Update'}
                 </button>
                 <button 
                   onClick={() => {
@@ -543,8 +583,10 @@ const Backgrounds = () => {
                     setEditingGallery(null);
                     setEditGalleryName('');
                     setEditGalleryDescription('');
+                    setEditGalleryFolderPath('');
                   }}
                   className="cancel-btn"
+                  disabled={galleryUpdateLoading}
                 >
                   Cancel
                 </button>
@@ -563,7 +605,7 @@ const Backgrounds = () => {
               <div className="gallery-info">
                 <h4>{gallery.name}</h4>
                 <p>{gallery.description || 'No description'}</p>
-                <span className="background-count">{gallery.backgroundCount || 0} backgrounds</span>
+                <span className="background-count">{gallery.imageCount || 0} backgrounds</span>
               </div>
               <div className="gallery-actions">
                 <button
@@ -757,7 +799,7 @@ const Backgrounds = () => {
                   <option value="">No gallery (individual images)</option>
                   {galleries.map(gallery => (
                     <option key={gallery.id} value={gallery.id}>
-                      {gallery.name} ({gallery.backgroundCount || 0} images)
+                      {gallery.name} ({gallery.imageCount || 0} images)
                     </option>
                   ))}
                 </select>

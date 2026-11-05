@@ -843,6 +843,10 @@ class GeviScraperService {
               
               if (performerName) {
                 const performerData = { name: performerName };
+                const href = $perfLink.attr('href');
+                if (href) {
+                  performerData.url = this.absUrl(href);
+                }
                 
                 // Get the text node immediately after the </a> tag
                 const nextNode = perfLink.nextSibling;

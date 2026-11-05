@@ -1,5 +1,7 @@
 const path = require('path');
 const fs = require('fs/promises');
+const { constants } = require('fs');
+const { randomUUID } = require('crypto');
 const prisma = require('../prismaClient');
 
 function sanitizeStoragePath(storagePath) {
@@ -75,6 +77,112 @@ async function ensureBackgroundUploadDirectory() {
   return uploadDir;
 }
 
+function isImageFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.avif'].includes(ext);
+}
+
+async function walkImageFilesRecursive(rootDir, maxFiles = 5000, excludedDir = null) {
+  const files = [];
+  async function walk(dir) {
+    if (files.length >= maxFiles) return;
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (files.length >= maxFiles) break;
+      const fullPath = path.join(dir, entry.name);
+      if (excludedDir && path.relative(excludedDir, fullPath) === '') continue;
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else if (entry.isFile() && isImageFile(fullPath)) {
+        files.push(fullPath);
+      }
+    }
+  }
+  await walk(rootDir);
+  return files;
+}
+
+async function getGalleryFolderFiles(networkFolderPath) {
+  const sourceDir = resolveConfiguredStoragePath(networkFolderPath);
+  const importDir = path.join(await getBackgroundUploadDirectory(), 'gallery-imports');
+  if (path.relative(importDir, sourceDir) === '' || containsPath(importDir, sourceDir)) {
+    const error = new Error('Choose a source folder outside the managed gallery-imports directory');
+    error.status = 400;
+    throw error;
+  }
+  try {
+    const files = await walkImageFilesRecursive(sourceDir, Infinity, importDir);
+    if (files.length === 0) {
+      const error = new Error('No supported image files found in the selected folder');
+      error.status = 400;
+      throw error;
+    }
+    return files;
+  } catch (error) {
+    if (['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes(error.code)) {
+      error.status = 400;
+      error.message = `Cannot read network folder: ${error.message}`;
+    }
+    throw error;
+  }
+}
+
+async function importGalleryImages(galleryId, sourceFiles) {
+  const uploadDir = path.join(await ensureBackgroundUploadDirectory(), 'gallery-imports');
+  await fs.mkdir(uploadDir, { recursive: true });
+  const existing = await removeMissingBackgrounds(await prisma.backgroundImage.findMany({
+    where: { galleryId },
+    select: { id: true, sourcePath: true, path: true }
+  }));
+  const existingPaths = new Set(existing.map(image => path.resolve(image.sourcePath || image.path)));
+  const stats = { scanned: sourceFiles.length, imported: 0, skipped: 0, failed: 0 };
+  const errors = [];
+  for (const sourcePath of sourceFiles) {
+    if (existingPaths.has(sourcePath)) {
+      stats.skipped++;
+      continue;
+    }
+    const filename = `bg-${randomUUID()}${path.extname(sourcePath).toLowerCase()}`;
+    const destination = path.join(uploadDir, filename);
+    let copied = false;
+    try {
+      await fs.copyFile(sourcePath, destination, constants.COPYFILE_EXCL);
+      copied = true;
+      const fileStats = await fs.stat(destination);
+      const ext = path.extname(sourcePath).toLowerCase();
+      const mimetype = {
+        '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
+        '.bmp': 'image/bmp', '.avif': 'image/avif', '.tif': 'image/tiff', '.tiff': 'image/tiff'
+      }[ext] || 'image/jpeg';
+      await prisma.backgroundImage.create({
+        data: {
+          filename, originalName: path.basename(sourcePath), path: destination,
+          sourcePath, galleryId, mimetype, size: fileStats.size
+        }
+      });
+      existingPaths.add(sourcePath);
+      stats.imported++;
+    } catch (error) {
+      console.error('[BACKGROUND-GALLERIES] Failed to import image:', sourcePath, error);
+      if (copied) {
+        try {
+          await fs.unlink(destination);
+        } catch (cleanupError) {
+          console.error('[BACKGROUND-GALLERIES] Failed to clean up imported file:', destination, cleanupError);
+        }
+      }
+      // Another save may have imported this source concurrently.
+      if (error.code === 'P2002') {
+        stats.skipped++;
+      } else {
+        stats.failed++;
+        errors.push({ filePath: sourcePath, error: error.message });
+      }
+    }
+  }
+  return { stats, errors };
+}
+
 function containsPath(root, filePath) {
   const relative = path.relative(root, filePath);
   return relative !== '' && relative !== '..' &&
@@ -142,5 +250,8 @@ module.exports = {
   resolveConfiguredStoragePath,
   getBackgroundUploadDirectory,
   ensureBackgroundUploadDirectory,
+  walkImageFilesRecursive,
+  getGalleryFolderFiles,
+  importGalleryImages,
   removeMissingBackgrounds
 };

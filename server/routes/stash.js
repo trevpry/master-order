@@ -38,6 +38,7 @@ const {
 } = require('../services/stashGroupPerformerService');
 const { upsertSceneFromStash } = require('../services/stashSceneLocalSync');
 const groupSceneSplit = require('../services/groupSceneSplitService');
+const geviSceneImport = require('../services/geviSceneImportService');
 const sceneTitleMovieSearch = require('../services/sceneTitleMovieSearchService');
 const {
   normalizeScrapedPerformers,
@@ -3518,6 +3519,9 @@ router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) =>
     processedScenes: 0,
     totalPerformers: 0,
     appliedActionCodes: 0,
+    importedPerformers: 0,
+    createdPerformers: 0,
+    addedSceneUrls: 0,
     createdTags: 0,
     errors: []
   };
@@ -3617,6 +3621,84 @@ router.post('/groups/:id/apply-matched-scenes', asyncHandler(async (req, res) =>
     } catch (error) {
       console.error(`      ❌ Failed to update scene metadata:`, error.message);
       results.errors.push({ sceneId: match.sceneId, error: error.message });
+    }
+
+    // Add the GEVI scene's own page URL to the scene (app + Stash)
+    if (match.episodeUrl) {
+      try {
+        if (!getActiveSyncService()) await initializeStashSyncService();
+        const urlSyncService = getActiveSyncService();
+        await urlSyncService?.ensureConfigLoaded?.();
+        const added = await geviSceneImport.addSceneUrl({
+          prisma,
+          syncService: urlSyncService,
+          sceneId: match.sceneId,
+          url: match.episodeUrl
+        });
+        if (added) {
+          results.addedSceneUrls++;
+          console.log(`      🔗 Added GEVI scene URL: ${match.episodeUrl}`);
+        }
+      } catch (error) {
+        console.error(`      ❌ Failed to add GEVI scene URL:`, error.message);
+        results.errors.push({ sceneId: match.sceneId, error: `Adding GEVI scene URL failed: ${error.message}` });
+      }
+    }
+
+    // Scenes that had no performers at scrape time get the GEVI performers attached first
+    // (performers missing from the library are created in Stash)
+    let importedPerformers = [];
+    const resolvedChoices = Array.isArray(match.performerImports)
+      ? geviSceneImport.resolvePerformerChoices(match.performerImports)
+      : null;
+    const performersToImport = resolvedChoices
+      ? resolvedChoices.performersToImport
+      : (Array.isArray(match.performersToImport) ? match.performersToImport : []);
+    const performersToCreate = resolvedChoices
+      ? resolvedChoices.performersToCreate
+      : (Array.isArray(match.performersToCreate) ? match.performersToCreate : []);
+    if (match.importPerformers && (performersToImport.length > 0 || performersToCreate.length > 0)) {
+      try {
+        if (!getActiveSyncService()) await initializeStashSyncService();
+        const syncService = getActiveSyncService();
+        if (!syncService) throw new Error('Stash sync service not initialized');
+        await syncService.ensureConfigLoaded?.();
+        importedPerformers = await geviSceneImport.importScenePerformers({
+          prisma,
+          syncService,
+          sceneId: match.sceneId,
+          performers: performersToImport,
+          performersToCreate
+        });
+        const createdCount = importedPerformers.filter(p => p.created).length;
+        results.importedPerformers += importedPerformers.length;
+        results.createdPerformers += createdCount;
+        console.log(`      ✅ Imported ${importedPerformers.length} performers (${createdCount} new): ${importedPerformers.map(p => p.name).join(', ')}`);
+      } catch (error) {
+        console.error(`      ❌ Failed to import performers:`, error.message);
+        results.errors.push({ sceneId: match.sceneId, error: `Performer import failed: ${error.message}` });
+      }
+    }
+
+    if (importedPerformers.length > 0) {
+      const performersWithCodes = importedPerformers
+        .filter(p => p.actionCode)
+        .map(p => ({ id: p.id, name: p.name, actionCode: p.actionCode }));
+      results.totalPerformers += importedPerformers.length;
+      try {
+        if (performersWithCodes.length > 0) {
+          const tagResult = await actionCodeService.applyActionCodeTagsForPerformers(match.sceneId, performersWithCodes, prisma);
+          results.appliedActionCodes += tagResult.totalApplied;
+          if (tagResult.missingTags && tagResult.missingTags.length > 0) {
+            results.errors.push({ sceneId: match.sceneId, missingTags: tagResult.missingTags });
+          }
+        }
+        results.processedScenes++;
+      } catch (error) {
+        console.error(`      ❌ Failed to apply action code tags:`, error.message);
+        results.errors.push({ sceneId: match.sceneId, error: error.message });
+      }
+      continue;
     }
 
     // Get scene with performers
@@ -5981,8 +6063,21 @@ router.post('/gevi/movie', asyncHandler(async (req, res) => {
     console.log(`   - Found ${groupScenes.length} scenes in database for this group`);
 
     if (groupScenes.length > 0) {
-      const dbScenes = groupScenes.map(gs => gs.scene);
+      // Include the scene's number in this group so scenes without performers can be matched by position
+      const dbScenes = groupScenes.map(gs => ({
+        ...gs.scene,
+        groups: [{ groupId: gs.groupId, sceneIndex: gs.sceneIndex }]
+      }));
       matchedScenes = await geviScraper.matchMovieScenes(movie.scenes, dbScenes);
+      await geviSceneImport.annotatePerformerImports(
+        matchedScenes,
+        dbScenes,
+        performers => geviScraper.matchPerformers(performers, prisma)
+      );
+      if (!getActiveSyncService()) {
+        await initializeStashSyncService().catch(err => console.warn('   - Stash sync service unavailable:', err.message));
+      }
+      const syncService = getActiveSyncService();
       console.log(`   - Matched ${matchedScenes.length} scenes`);
       console.log(`   - Matched scenes details:`, JSON.stringify(matchedScenes, null, 2));
       
@@ -6076,14 +6171,16 @@ router.post('/gevi/movie', asyncHandler(async (req, res) => {
               
               console.log(`   - Sending GraphQL mutation for scene ${match.sceneId}:`, JSON.stringify(variables, null, 2));
               
+              if (!syncService) throw new Error('Stash sync service not initialized');
               const result = await syncService.makeGraphQLRequest(mutation, variables);
+              const sceneUpdate = result?.sceneUpdate || result?.data?.sceneUpdate;
               
-              if (!result || !result.data || !result.data.sceneUpdate) {
+              if (!sceneUpdate) {
                 console.error(`   - ❌ Invalid response from Stash:`, result);
                 throw new Error('Invalid response from Stash');
               }
               
-              console.log(`   - ✅ Updated Stash for scene ${match.sceneId}:`, result.data.sceneUpdate);
+              console.log(`   - ✅ Updated Stash for scene ${match.sceneId}:`, sceneUpdate);
               
             } catch (error) {
               console.error(`   - ❌ Failed to update scene ${match.sceneId}:`, error.message);

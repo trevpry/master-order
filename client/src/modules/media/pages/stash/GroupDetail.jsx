@@ -7,6 +7,7 @@ import EditGroupModal from './components/EditGroupModal';
 import GroupPerformers from './components/GroupPerformers';
 import SplitSceneModal from './components/SplitSceneModal';
 import GroupBlackFrameScan from './components/GroupBlackFrameScan';
+import GeviPerformerImportEditor from './components/GeviPerformerImportEditor';
 import config from '../../../../config';
 
 export default function GroupDetail() {
@@ -305,6 +306,22 @@ export default function GroupDetail() {
         } else {
           const scenesResult = await scenesResponse.json();
           console.log('✅ Action codes applied:', scenesResult.data?.results);
+          const applied = scenesResult.data?.results;
+          const failures = (applied?.errors || []).filter(e => e.error);
+          if (applied?.importedPerformers > 0 || applied?.addedSceneUrls > 0 || failures.length > 0) {
+            const lines = [];
+            if (applied.importedPerformers > 0) {
+              lines.push(`Imported ${applied.importedPerformers} performer(s) into scenes without performers` +
+                (applied.createdPerformers > 0 ? ` (${applied.createdPerformers} newly created in Stash).` : '.'));
+            }
+            if (applied.addedSceneUrls > 0) {
+              lines.push(`Added the GEVI scene URL to ${applied.addedSceneUrls} scene(s).`);
+            }
+            if (failures.length > 0) {
+              lines.push(`${failures.length} problem(s):`, ...failures.slice(0, 5).map(e => `• ${e.error}`));
+            }
+            alert(lines.join('\n'));
+          }
         }
       }
 
@@ -1689,7 +1706,43 @@ export default function GroupDetail() {
                           )}
                           
                           {/* Performers */}
-                          {match.performers && match.performers.length > 0 && (
+                          {match.importPerformers ? (
+                            <div style={{ marginBottom: '0.5rem' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', display: 'block', marginBottom: '0.25rem' }}>
+                                Performers to import (scene has none):
+                              </span>
+                              {Array.isArray(match.performerImports) ? (
+                                <GeviPerformerImportEditor
+                                  entries={match.performerImports}
+                                  onChange={(performerImports) => setScrapeData(prev => ({
+                                    ...prev,
+                                    matchedScenes: prev.matchedScenes.map((m, i) => (i === idx ? { ...m, performerImports } : m))
+                                  }))}
+                                />
+                              ) : (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                                {match.performersToImport?.map(p => (
+                                  <span
+                                    key={`import-${p.id}`}
+                                    title={p.scrapedName !== p.name ? `GEVI: ${p.scrapedName}` : undefined}
+                                    style={{ fontSize: '0.75rem', padding: '0.125rem 0.5rem', background: '#d1fae5', color: '#065f46', borderRadius: '9999px' }}
+                                  >
+                                    ➕ {p.name}{p.actionCode ? ` (${p.actionCode})` : ''}
+                                  </span>
+                                ))}
+                                {match.performersToCreate?.map(p => (
+                                  <span
+                                    key={`create-${p.name}`}
+                                    title={p.url ? `Not in your library - will be created in Stash (${p.url})` : 'Not in your library - will be created in Stash'}
+                                    style={{ fontSize: '0.75rem', padding: '0.125rem 0.5rem', background: '#ede9fe', color: '#5b21b6', borderRadius: '9999px' }}
+                                  >
+                                    ✨ {p.name}{p.actionCode ? ` (${p.actionCode})` : ''} · new
+                                  </span>
+                                ))}
+                              </div>
+                              )}
+                            </div>
+                          ) : match.performers && match.performers.length > 0 && (
                             <div style={{ marginBottom: '0.5rem' }}>
                               <span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280' }}>
                                 Performers:{' '}
@@ -1811,7 +1864,7 @@ export default function GroupDetail() {
                                   textDecoration: 'none'
                                 }}
                               >
-                                View on GEVI →
+                                View on GEVI → <span style={{ color: '#6b7280' }}>(will be added to the scene&apos;s URLs)</span>
                               </a>
                             </div>
                           )}

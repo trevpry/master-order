@@ -12,36 +12,9 @@ const {
   resolveConfiguredStoragePath,
   getBackgroundUploadDirectory,
   ensureBackgroundUploadDirectory,
-  removeMissingBackgrounds
+  removeMissingBackgrounds,
+  walkImageFilesRecursive
 } = require('../services/backgroundImageService');
-
-function isImageFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.avif'].includes(ext);
-}
-
-async function walkImageFilesRecursive(rootDir, maxFiles = 5000) {
-  const files = [];
-
-  async function walk(dir) {
-    if (files.length >= maxFiles) return;
-    const entries = await fsp.readdir(dir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (files.length >= maxFiles) break;
-      const fullPath = path.join(dir, entry.name);
-
-      if (entry.isDirectory()) {
-        await walk(fullPath);
-      } else if (entry.isFile() && isImageFile(fullPath)) {
-        files.push(fullPath);
-      }
-    }
-  }
-
-  await walk(rootDir);
-  return files;
-}
 
 // Configure multer for file uploads
 const backgroundStorage = multer.diskStorage({

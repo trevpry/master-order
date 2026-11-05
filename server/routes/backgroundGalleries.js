@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../prismaClient'); // Use shared singleton instance
-const { removeMissingBackgrounds } = require('../services/backgroundImageService');
+const {
+  removeMissingBackgrounds, getGalleryFolderFiles, importGalleryImages
+} = require('../services/backgroundImageService');
 
 // Get all background galleries
 router.get('/', async (req, res) => {
@@ -161,8 +163,15 @@ router.put('/:id', async (req, res) => {
   console.log('🖼️ [BACKGROUND-GALLERIES] Request body:', req.body);
 
   try {
-    const galleryId = parseInt(req.params.id);
-    const { name, description } = req.body;
+    const galleryId = Number(req.params.id);
+    const { name, description, networkFolderPath } = req.body;
+
+    if (!Number.isInteger(galleryId) || galleryId <= 0 ||
+        (name !== undefined && (typeof name !== 'string' || !name.trim())) ||
+        (description !== undefined && description !== null && typeof description !== 'string') ||
+        (networkFolderPath !== undefined && networkFolderPath !== null && typeof networkFolderPath !== 'string')) {
+      return res.status(400).json({ success: false, error: 'Invalid gallery name, description, folder path, or ID' });
+    }
 
     // Check if gallery exists
     const existingGallery = await prisma.backgroundGallery.findUnique({
@@ -177,10 +186,10 @@ router.put('/:id', async (req, res) => {
     }
 
     // Check for duplicate names (excluding current gallery)
-    if (name && name !== existingGallery.name) {
+    if (name && name.trim() !== existingGallery.name) {
       const duplicateGallery = await prisma.backgroundGallery.findFirst({
         where: {
-          name: name,
+          name: name.trim(),
           id: {
             not: galleryId
           }
@@ -202,22 +211,30 @@ router.put('/:id', async (req, res) => {
 
     if (name !== undefined) updateData.name = name.trim();
     if (description !== undefined) updateData.description = description?.trim() || null;
+    if (networkFolderPath !== undefined) {
+      updateData.networkFolderPath = networkFolderPath?.trim() || null;
+    }
+    const folderPath = updateData.networkFolderPath === undefined ?
+      existingGallery.networkFolderPath : updateData.networkFolderPath;
+    const sourceFiles = folderPath ? await getGalleryFolderFiles(folderPath) : null;
 
     const updatedGallery = await prisma.backgroundGallery.update({
       where: { id: galleryId },
       data: updateData
     });
+    const folderImport = sourceFiles ? await importGalleryImages(galleryId, sourceFiles) : null;
 
     console.log('🖼️ [BACKGROUND-GALLERIES] Updated gallery:', galleryId);
 
     res.json({
       success: true,
       message: 'Gallery updated successfully',
-      gallery: updatedGallery
+      gallery: updatedGallery,
+      folderImport
     });
   } catch (error) {
     console.error('🖼️ [BACKGROUND-GALLERIES] Update error:', error);
-    res.status(500).json({
+    res.status(error.status || 500).json({
       success: false,
       error: 'Failed to update gallery',
       message: error.message
