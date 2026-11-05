@@ -1165,6 +1165,9 @@ async function discardConversion(deps, sceneId) {
 
 const BLACK_SCAN_DEFAULT_WINDOW = 90;
 const BLACK_SCAN_MAX_WINDOW = 600;
+const BLACK_SCAN_CHUNK_SECONDS = 600;
+const BLACK_SCAN_SKIP_SECONDS = 5;
+const BLACK_SCAN_MAX_FAILURES = 4;
 const blackScans = new Map();
 
 /** Merge ±window ranges around each cut into sorted, non-overlapping [start, end] scan ranges. */
@@ -1215,6 +1218,8 @@ function mergeBlackIntervals(intervals) {
 function buildBlackdetectArgs(input, start, length) {
   return [
     '-hide_banner', '-nostats', '-v', 'info',
+    // Fewer decoder threads keep memory low on long/high-resolution files; damaged frames are skipped, not fatal
+    '-threads', '2', '-fflags', '+discardcorrupt', '-err_detect', 'ignore_err',
     '-ss', String(start), '-t', String(length),
     '-i', input,
     '-map', '0:v:0', '-an', '-sn', '-dn',
@@ -1241,10 +1246,18 @@ function runFfmpegCapture(ffmpegPath, args, { onProgress, holder } = {}) {
     });
     child.stderr.on('data', chunk => { stderr += chunk.toString(); });
     child.on('error', reject);
-    child.on('close', code => {
+    child.on('close', (code, signal) => {
       if (holder) holder.child = null;
-      if (code === 0) resolve(stderr);
-      else reject(new Error(holder?.cancelled ? 'Cancelled' : `ffmpeg exited with code ${code}: ${stderr.trim().split(/\r?\n/).slice(-2).join(' | ')}`));
+      if (code === 0) {
+        resolve(stderr);
+        return;
+      }
+      // A null exit code means ffmpeg didn't exit normally; it was terminated by a signal (crash, OOM killer, ...)
+      const cause = code === null ? `ffmpeg was terminated by ${signal || 'a signal'}` : `ffmpeg exited with code ${code}`;
+      const error = new Error(holder?.cancelled ? 'Cancelled' : `${cause}: ${stderr.trim().split(/\r?\n/).slice(-2).join(' | ')}`);
+      error.stderr = stderr;
+      error.signal = signal;
+      reject(error);
     });
   });
 }
@@ -1291,32 +1304,72 @@ function registerBlackScan({ groupId, sceneId, fullScan, window, ranges }) {
 async function runBlackScan(deps, scan, { localSource, file }) {
   const { ranges, sceneId } = scan;
   const totalLength = ranges.reduce((sum, [a, b]) => sum + (b - a), 0) || 1;
+  const chunkSeconds = deps.blackScanChunkSeconds || BLACK_SCAN_CHUNK_SECONDS;
   const found = [];
   const completedRanges = [];
+  const skipped = [];
   let done = 0;
+  let lastError = null;
   try {
-    for (const [start, end] of ranges) {
+    for (const [rangeStart, rangeEnd] of ranges) {
+      // Long ranges are scanned in chunks, and an ffmpeg that dies (out of memory, damaged frames) is resumed just
+      // past the point it reached, so one bad spot doesn't throw away the whole scan
+      let position = rangeStart;
+      let failures = 0;
+      while (position < rangeEnd - 0.05 && !scan.cancelled) {
+        const chunkEnd = Math.min(rangeEnd, position + chunkSeconds);
+        const length = chunkEnd - position;
+        let reached = 0;
+        try {
+          const stderr = await runFfmpegCapture(deps.ffmpegPath, buildBlackdetectArgs(localSource, position, length), {
+            holder: scan,
+            onProgress: (t) => {
+              reached = Math.max(reached, Math.min(t, length));
+              scan.progress = Math.min(0.99, (done + reached) / totalLength);
+            }
+          });
+          found.push(...parseBlackdetect(stderr, position, chunkEnd));
+          completedRanges.push([position, chunkEnd]);
+          done += length;
+          position = chunkEnd;
+          failures = 0;
+        } catch (error) {
+          if (scan.cancelled) break;
+          lastError = error;
+          // Keep what was found before ffmpeg stopped (minus the last second, which may be incomplete)
+          const safe = Math.max(0, reached - 1);
+          failures = safe > 10 ? 1 : failures + 1;
+          if (safe > 0) {
+            found.push(...parseBlackdetect(error.stderr, position, position + safe));
+            completedRanges.push([position, position + safe]);
+          }
+          const resumeAt = Math.min(chunkEnd, position + safe + BLACK_SCAN_SKIP_SECONDS * failures);
+          if (resumeAt > position + safe) skipped.push([round(position + safe), round(resumeAt)]);
+          console.warn(`⬛ Black-frame scan of scene ${sceneId} interrupted at ${formatClock(position + reached)} (${error.message.split(':')[0]}); resuming at ${formatClock(resumeAt)}`);
+          done += resumeAt - position;
+          position = resumeAt;
+          if (failures >= BLACK_SCAN_MAX_FAILURES) throw error;
+        }
+        scan.intervals = mergeBlackIntervals(found);
+        scan.progress = Math.min(0.99, done / totalLength);
+      }
       if (scan.cancelled) break;
-      const length = end - start;
-      const stderr = await runFfmpegCapture(deps.ffmpegPath, buildBlackdetectArgs(localSource, start, length), {
-        holder: scan,
-        onProgress: (t) => { scan.progress = Math.min(0.99, (done + Math.min(t, length)) / totalLength); }
-      });
-      found.push(...parseBlackdetect(stderr, start, end));
-      completedRanges.push([start, end]);
-      done += length;
-      scan.intervals = mergeBlackIntervals(found);
-      scan.progress = Math.min(0.99, done / totalLength);
     }
     if (!scan.cancelled) {
+      if (completedRanges.length === 0 && lastError) throw lastError;
       scan.status = 'completed';
       scan.progress = 1;
-      console.log(`⬛ Black-frame scan of scene ${sceneId}: ${scan.intervals.length} black interval(s) in ${ranges.length} range(s)`);
+      if (skipped.length > 0) {
+        const lost = round(skipped.reduce((sum, [a, b]) => sum + (b - a), 0));
+        scan.skipped = skipped;
+        scan.warning = `ffmpeg stopped ${skipped.length} time(s) while scanning (${lastError?.message.split(':')[0]}); skipped ${lost}s around ${skipped.map(([a]) => formatClock(a)).join(', ')}`;
+      }
+      console.log(`⬛ Black-frame scan of scene ${sceneId}: ${scan.intervals.length} black interval(s) in ${ranges.length} range(s)${scan.warning ? ` (${scan.warning})` : ''}`);
     }
   } catch (error) {
     if (!scan.cancelled) {
       scan.status = 'failed';
-      scan.error = error.message;
+      scan.error = `${error.message.split(':')[0]} repeatedly near ${formatClock(done)}; ${scan.intervals.length} black run(s) found before that were kept`;
       console.warn(`⬛ Black-frame scan of scene ${sceneId} failed: ${error.message}`);
     }
   } finally {

@@ -152,6 +152,10 @@ model StashGroupTag {
 
 **API:** `PATCH /api/stash/groups/:id` (`server/services/stashGroupEditService.js`) sends only the changed fields to Stash via `groupUpdate`. Blank values clear the field, and `urls`/`tagIds` replace the existing lists. The local `StashGroup` row (plus tag links) is then updated from Stash's response; if Stash rejects the edit, local data is untouched. `GET /api/stash/group-edit/lookup?type=studio|tag&q=` powers the studio/tag pickers. The older `PUT /api/stash/groups/:id` remains the scrape-merge endpoint.
 
+**Creating groups:** `EditGroupModal` without a `group.id` is a create form (a `group` without an id only prefills the name/studio). Saving calls `POST /api/stash/groups/create {name}` and then sends every other filled-in field through the same `PATCH`. If that second step fails, the group still exists and the user is told which details weren't saved.
+- **Groups page:** "➕ New Group" (prefilled with the current search text) opens the new group's detail page after creating it.
+- **Scene detail:** "➕ New Group" in the Groups / Movies card, or "Create new group" in the Add Group/Movie search (prefilled with the search text), creates a group with the scene's studio and adds the scene to it (`POST /api/stash/groups/:id/add-scene`).
+
 ### 8. AEBN Scene List Scraping ✅
 **Scraper:** `server/services/scrapers/AebnScraper.js` → `parseAebnMoviePage(html)` reads every `section[id^="scene-"]`. For each scene it returns the number, a clean length (`"16:13"`), `durationSeconds` and `quality` (split from AEBN's `"16:13 (SD-480p)"`), plus performers and tags. It also returns movie fields: synopsis, front/back box covers (full size), studio, release date/director when listed, and Running Time.
 
@@ -202,6 +206,7 @@ On GroupDetail each scene card has **✂️ Split into Scenes**. It turns a full
        - "Snap" (or `S`) moves the selected cut, and "Snap all cuts" applies every suggestion that doesn't cross a neighbor. An end/start pair around a gap may both land on the same black run, which joins the two scenes at one cut.
        - Results of fully scanned ranges are stored per clip (also when a scan is cancelled) in `<DATA_PATH or /app/data or ./data>/stash-black-frames.json` (`server/services/stashBlackFrameStore.js`, keyed by scene id and invalidated when the file path/size changes). The editor opens with them, and a new scan adds to them.
        - Only one clip per group is scanned at a time; starting a scan of another clip while one runs returns 409 `SCAN_BUSY`.
+       - Scans run in 10-minute chunks with 2 decoder threads, skipping corrupt frames. If ffmpeg stops abnormally (terminated by a signal, which used to show as "exited with code null", e.g. from a crash on damaged frames or the out-of-memory killer), the black runs found so far are kept and the scan resumes just past where it stopped. The skipped seconds are reported as a `warning`, and it only fails after 4 failures in a row with no progress.
        - Scanning needs the server to read the file, so it only works where the Stash library is mounted (production).
    - **Group clip list:** above the scene grid, "⬛ Black frames" lists every clip with its stored results (`GET /api/stash/groups/:id/black-frames?sceneIds=1,2` → `{activeScan, results{[id]: {blackRuns, fullScan, scannedSeconds, duration, scannedAt}}}`).
      - Each clip has a **Scan** button (a whole-file scan through the endpoint above) and **Edit cuts**, which opens its split editor. One clip is scanned at a time, and a running scan is picked up again after a reload.

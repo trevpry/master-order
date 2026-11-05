@@ -759,6 +759,7 @@ export default function SplitTimeline({
                 <div className="stl-progress"><div style={{ width: `${Math.round((scan.progress || 0) * 100)}%` }} /></div>
               )}
               {scan?.status === 'failed' && <div className="stl-scan-error">{scan.error}</div>}
+              {scan?.status === 'completed' && scan.warning && <div className="stl-scan-error">⚠️ {scan.warning}</div>}
               {scan && scan.status !== 'failed' && scan.status !== 'running' && (
                 <div className="stl-muted">
                   {blackIntervals.length} black run{blackIntervals.length === 1 ? '' : 's'} found

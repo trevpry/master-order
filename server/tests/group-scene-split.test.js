@@ -376,6 +376,17 @@ test('startBlackScan scans around cuts in the background and reports black runs'
     assert.strictEqual(scan.intervals.length, 1);
     assert.ok(Math.abs(scan.intervals[0].start - 6) < 0.25 && Math.abs(scan.intervals[0].end - 7) < 0.25, JSON.stringify(scan.intervals));
     await assert.rejects(split.startBlackScan({ graphql, ffmpegPath }, '7', { sceneId: '55', cuts: [] }), /Nothing to scan/);
+
+    // Scanned in short chunks, the black run split across a chunk boundary is joined back together
+    const chunked = await split.startBlackScan({ graphql, ffmpegPath, blackScanChunkSeconds: 2.8 }, '7', { sceneId: '55', fullScan: true });
+    let chunkScan = chunked;
+    for (let i = 0; i < 450 && chunkScan.status === 'running'; i++) {
+     await new Promise(r => setTimeout(r, 100));
+     chunkScan = split.getBlackScan(chunked.id);
+    }
+    assert.strictEqual(chunkScan.status, 'completed', chunkScan.error || '');
+    assert.strictEqual(chunkScan.intervals.length, 1, JSON.stringify(chunkScan.intervals));
+    assert.ok(Math.abs(chunkScan.intervals[0].start - 6) < 0.25 && Math.abs(chunkScan.intervals[0].end - 7) < 0.25, JSON.stringify(chunkScan.intervals));
   } finally {
     if (previousMap === undefined) delete process.env.STASH_PATH_MAP; else process.env.STASH_PATH_MAP = previousMap;
     fs.rmSync(dir, { recursive: true, force: true });

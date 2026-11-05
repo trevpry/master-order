@@ -10,6 +10,7 @@ import AddPerformerModal from './components/AddPerformerModal';
 import MergePerformersModal from '../../../../components/stash/MergePerformersModal';
 import PerformerCheckboxOverlay from '../../../../components/stash/PerformerCheckboxOverlay';
 import ScrapeAllReviewModal from './components/ScrapeAllReviewModal';
+import EditGroupModal from './components/EditGroupModal';
 import { buildSelectedPerformersForApply } from './utils/scrapeReviewSelectionUtils';
 import config from '../../../../config';
 
@@ -106,6 +107,7 @@ export default function SceneDetail() {
   const [groupSearchResults, setGroupSearchResults] = useState([]);
   const [isSearchingGroups, setIsSearchingGroups] = useState(false);
   const [isAddingGroup, setIsAddingGroup] = useState(false);
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   
   // Clip aggregate rating
   const [clipAggregateRating, setClipAggregateRating] = useState(null);
@@ -277,6 +279,17 @@ export default function SceneDetail() {
   }, [id]);
   
   // Fetch clips and calculate aggregate rating
+  // Re-read the scene after a change (e.g. group links) without the full-page loading state
+  const loadScene = async () => {
+    try {
+      const res = await fetch(`${config.apiBaseUrl}/api/stash/scenes/${id}`);
+      const json = await res.json();
+      if (json.success) setData(json.data);
+    } catch (error) {
+      console.error('Error reloading scene:', error);
+    }
+  };
+
   const fetchClipsAggregateRating = async (sceneId) => {
     try {
       const res = await fetch(`${config.apiBaseUrl}/api/stash/clips?sceneId=${sceneId}&perPage=999`);
@@ -4151,13 +4164,22 @@ export default function SceneDetail() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h3 style={{ margin: 0 }}>🎬 Groups / Movies ({data.groups?.length || 0})</h3>
-            <Button
-              onClick={() => setShowGroupSearchModal(true)}
-              variant="primary"
-              size="sm"
-            >
-              + Add Group/Movie
-            </Button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Button
+                onClick={() => setShowCreateGroupModal(true)}
+                variant="secondary"
+                size="sm"
+              >
+                ➕ New Group
+              </Button>
+              <Button
+                onClick={() => setShowGroupSearchModal(true)}
+                variant="primary"
+                size="sm"
+              >
+                + Add Group/Movie
+              </Button>
+            </div>
           </div>
           {data.groups && data.groups.length > 0 ? (
             <>
@@ -6080,6 +6102,17 @@ export default function SceneDetail() {
                   No groups found matching "{groupSearchQuery}"
                 </div>
               )}
+
+              <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '8px', color: '#6b7280', fontSize: '0.9rem' }}>
+                <span>Not in the list?</span>
+                <Button
+                  onClick={() => { setShowGroupSearchModal(false); setShowCreateGroupModal(true); }}
+                  variant="secondary"
+                  size="sm"
+                >
+                  ➕ Create new group{groupSearchQuery.trim() ? ` "${groupSearchQuery.trim()}"` : ''}
+                </Button>
+              </div>
             </div>
 
             <div className="modal-actions">
@@ -6097,6 +6130,22 @@ export default function SceneDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {showCreateGroupModal && (
+        <EditGroupModal
+          group={{
+            name: groupSearchQuery.trim(),
+            studio: data.studio?.id ? { id: data.studio.id, name: data.studio.name } : null
+          }}
+          title="➕ New Group for This Scene"
+          saveLabel="➕ Create Group & Add Scene"
+          onClose={() => setShowCreateGroupModal(false)}
+          onSaved={async (group) => {
+            setShowCreateGroupModal(false);
+            await handleAddGroupToScene(group.id, group.name);
+          }}
+        />
       )}
 
       {/* Delete Scene Confirmation Modal */}

@@ -141,6 +141,7 @@ export default function GroupBlackFrameScan({ groupId, scenes, onOpenScene, refr
       </div>
       {error && <div className="gbf-error">{error}</div>}
       {lastScan && lastScan.status === 'failed' && <div className="gbf-error">Scan of “{titleOf(lastScan.sceneId)}” failed: {lastScan.error}</div>}
+      {lastScan && lastScan.status === 'completed' && lastScan.warning && <div className="gbf-error">Scan of “{titleOf(lastScan.sceneId)}”: {lastScan.warning}</div>}
       {expanded && (
         <table className="gbf-table">
           <thead><tr><th>Clip</th><th>Length</th><th>Black frames</th><th></th></tr></thead>

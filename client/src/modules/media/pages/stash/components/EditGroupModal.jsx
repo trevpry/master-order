@@ -232,13 +232,19 @@ function ImageField({ label, currentUrl, value, onChange }) {
   );
 }
 
+const EMPTY_GROUP = {};
+
 /**
  * Edits a Stash group. Saving sends only changed fields to PATCH /api/stash/groups/:id, which
  * applies them in Stash (groupUpdate) and then mirrors the result locally.
+ * Without a `group` (or with `group.id` missing) it creates one instead: POST /api/stash/groups/create with the
+ * name, then the remaining fields through the same PATCH. `group.name` etc. can prefill a new group.
  */
-export default function EditGroupModal({ group, onClose, onSaved }) {
+export default function EditGroupModal({ group: groupProp, onClose, onSaved, title, saveLabel }) {
+  const group = groupProp || EMPTY_GROUP;
+  const isNew = !group.id;
   const initial = useMemo(() => ({
-    name: group.name || '',
+    name: isNew ? '' : (group.name || ''),
     aliases: group.aliases || '',
     date: group.date || '',
     duration: formatDuration(group.duration),
@@ -248,9 +254,11 @@ export default function EditGroupModal({ group, onClose, onSaved }) {
     urls: parseUrls(group.url).join('\n'),
     studio: group.studio ? { id: group.studio.id, name: group.studio.name } : null,
     tags: (group.tags || []).map(wrapper => wrapper.tag).filter(Boolean).map(tag => ({ id: tag.id, name: tag.name }))
-  }), [group]);
+  }), [group, isNew]);
 
-  const [form, setForm] = useState(initial);
+  const [form, setForm] = useState(() => (isNew
+    ? { ...initial, name: group.name || '', studio: group.studio ? { id: group.studio.id, name: group.studio.name } : null }
+    : initial));
   const [frontImage, setFrontImage] = useState(undefined);
   const [backImage, setBackImage] = useState(undefined);
   const [saving, setSaving] = useState(false);
@@ -297,18 +305,38 @@ export default function EditGroupModal({ group, onClose, onSaved }) {
       setError(e.message);
       return;
     }
-    if (Object.keys(changes).length === 0) {
+    if (Object.keys(changes).length === 0 && !isNew) {
       onClose();
       return;
     }
-    if (changes.name !== undefined && !changes.name) {
+    if (isNew ? !form.name.trim() : (changes.name !== undefined && !changes.name)) {
       setError('Name is required');
       return;
     }
 
     setSaving(true);
+    let created = null;
     try {
-      const res = await fetch(`${config.apiBaseUrl}/api/stash/groups/${group.id}`, {
+      let groupId = group.id;
+      if (isNew) {
+        const createRes = await fetch(`${config.apiBaseUrl}/api/stash/groups/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: form.name.trim() })
+        });
+        const createJson = await createRes.json().catch(() => ({}));
+        if (!createRes.ok || createJson.success === false || !createJson.data?.group?.id) {
+          throw new Error(createJson.error || createJson.message || `Create failed (${createRes.status})`);
+        }
+        created = createJson.data.group;
+        groupId = created.id;
+        delete changes.name;
+        if (Object.keys(changes).length === 0) {
+          await onSaved(created);
+          return;
+        }
+      }
+      const res = await fetch(`${config.apiBaseUrl}/api/stash/groups/${groupId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(changes)
@@ -319,6 +347,12 @@ export default function EditGroupModal({ group, onClose, onSaved }) {
       }
       await onSaved(json.data);
     } catch (e) {
+      if (created) {
+        // The group exists; hand it back so the caller can still use it, and say what didn't save
+        alert(`Group "${created.name}" was created, but its other details weren't saved: ${e.message}`);
+        await onSaved(created);
+        return;
+      }
       setError(e.message);
       setSaving(false);
     }
@@ -340,7 +374,7 @@ export default function EditGroupModal({ group, onClose, onSaved }) {
     >
       <div
         role="dialog"
-        aria-label="Edit group"
+        aria-label={isNew ? 'New group' : 'Edit group'}
         onClick={(e) => e.stopPropagation()}
         style={{
           background: 'white',
@@ -353,9 +387,9 @@ export default function EditGroupModal({ group, onClose, onSaved }) {
           boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
         }}
       >
-        <h2 style={{ marginTop: 0 }}>✏️ Edit Group</h2>
+        <h2 style={{ marginTop: 0 }}>{title || (isNew ? '➕ New Group' : '✏️ Edit Group')}</h2>
         <p style={{ marginTop: '-0.5rem', color: '#718096', fontSize: '0.875rem' }}>
-          Changes are saved to Stash and then synced to Master Order.
+          {isNew ? 'The group is created in Stash and then synced to Master Order.' : 'Changes are saved to Stash and then synced to Master Order.'}
         </p>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.6fr)', gap: '1.5rem' }}>
@@ -472,7 +506,7 @@ export default function EditGroupModal({ group, onClose, onSaved }) {
             disabled={saving}
             style={{ padding: '0.55rem 1.1rem', background: '#667eea', color: 'white', border: 'none', borderRadius: '4px', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}
           >
-            {saving ? 'Saving to Stash…' : '💾 Save to Stash'}
+            {saving ? (isNew ? 'Creating in Stash…' : 'Saving to Stash…') : (saveLabel || (isNew ? '➕ Create Group' : '💾 Save to Stash'))}
           </button>
         </div>
       </div>

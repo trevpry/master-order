@@ -3,6 +3,7 @@ import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import Button from '../../../../shared/components/Button';
 import config from '../../../../config';
+import EditGroupModal from './components/EditGroupModal';
 
 export default function GroupsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -27,6 +28,7 @@ export default function GroupsPage() {
   const [groupsToMerge, setGroupsToMerge] = useState([]);
   const [mergeGroupData, setMergeGroupData] = useState(null);
   const [isMerging, setIsMerging] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const currentPage = parseInt(searchParams.get('page') || '1', 10);
 
@@ -229,6 +231,9 @@ export default function GroupsPage() {
       <div className="header">
         <h1>🎬 Groups (Movies)</h1>
         <p className="muted">Browse your movie/series collections</p>
+        <Button onClick={() => setShowCreateModal(true)} style={{ marginTop: '1rem', marginRight: '0.75rem' }}>
+          ➕ New Group
+        </Button>
         {selectedGroups.size >= 2 && (
           <Button 
             onClick={handleOpenMergeModal}
@@ -525,6 +530,18 @@ export default function GroupsPage() {
       )}
 
       {/* Merge Modal */}
+      {showCreateModal && (
+        <EditGroupModal
+          group={searchQuery.trim() ? { name: searchQuery.trim() } : null}
+          onClose={() => setShowCreateModal(false)}
+          onSaved={(group) => {
+            setShowCreateModal(false);
+            toast.success(`Group "${group.name}" created`);
+            navigate(`/media/stash/groups/${group.id}`);
+          }}
+        />
+      )}
+
       {showMergeModal && groupsToMerge.length > 0 && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
