@@ -7,126 +7,17 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 
 const prisma = require('../prismaClient'); // Use shared singleton instance
-
-// Helper function to determine upload directory based on environment
-function getUploadDirectory(type = '') {
-  const baseDir = process.env.UPLOAD_DIR || './uploads';
-  return type ? path.join(baseDir, type) : baseDir;
-}
-
-function sanitizeStoragePath(storagePath) {
-  if (typeof storagePath !== 'string') return '';
-  const trimmed = storagePath.trim();
-  return trimmed;
-}
-
-function normalizeSlashes(inputPath) {
-  return inputPath.replace(/\\/g, '/');
-}
-
-function parseUncPath(inputPath) {
-  const normalized = normalizeSlashes(inputPath);
-  const match = normalized.match(/^\/\/([^/]+)\/([^/]+)(\/.*)?$/);
-  if (!match) return null;
-
-  return {
-    server: match[1],
-    share: match[2],
-    rest: (match[3] || '').replace(/^\/+/, '')
-  };
-}
-
-function applyUncMappings(inputPath) {
-  const mappings = process.env.BACKGROUND_UNC_PATH_MAPPINGS;
-  if (!mappings) return null;
-
-  const normalizedInput = normalizeSlashes(inputPath);
-  const mappingPairs = mappings
-    .split(';')
-    .map(entry => entry.trim())
-    .filter(Boolean);
-
-  for (const pair of mappingPairs) {
-    const separatorIndex = pair.indexOf('=');
-    if (separatorIndex <= 0) continue;
-
-    const uncPrefix = normalizeSlashes(pair.slice(0, separatorIndex).trim()).replace(/\/+$/, '');
-    const targetPrefix = pair.slice(separatorIndex + 1).trim();
-    if (!uncPrefix || !targetPrefix) continue;
-
-    const inputLower = normalizedInput.toLowerCase();
-    const prefixLower = uncPrefix.toLowerCase();
-    if (inputLower === prefixLower || inputLower.startsWith(`${prefixLower}/`)) {
-      const remainder = normalizedInput.slice(uncPrefix.length).replace(/^\/+/, '');
-      return remainder ? path.join(targetPrefix, remainder) : targetPrefix;
-    }
-  }
-
-  return null;
-}
-
-function resolveConfiguredStoragePath(configuredPath) {
-  const rawPath = sanitizeStoragePath(configuredPath);
-  if (!rawPath) return '';
-
-  const unc = parseUncPath(rawPath);
-  if (!unc) {
-    return path.resolve(rawPath);
-  }
-
-  // UNC paths are directly usable on Windows hosts.
-  if (process.platform === 'win32') {
-    return path.resolve(rawPath);
-  }
-
-  // First priority: explicit mapping provided via environment variable.
-  const mappedPath = applyUncMappings(rawPath);
-  if (mappedPath) {
-    return path.resolve(mappedPath);
-  }
-
-  // Unraid default heuristic: //tower/Media/... -> /mnt/user/Media/...
-  const unraidServerName = (process.env.UNRAID_SERVER_NAME || 'tower').toLowerCase();
-  if (unc.server.toLowerCase() === unraidServerName) {
-    const unraidShareRoot = process.env.UNRAID_SHARE_ROOT || '/mnt/user';
-    return path.resolve(path.join(unraidShareRoot, unc.share, unc.rest));
-  }
-
-  // Generic Linux fallback for externally mounted SMB shares.
-  const uncMountRoot = process.env.UNC_MOUNT_ROOT || '/mnt/remotes';
-  return path.resolve(path.join(uncMountRoot, unc.server, unc.share, unc.rest));
-}
+const {
+  getConfiguredBackgroundStoragePath,
+  resolveConfiguredStoragePath,
+  getBackgroundUploadDirectory,
+  ensureBackgroundUploadDirectory,
+  removeMissingBackgrounds
+} = require('../services/backgroundImageService');
 
 function isImageFile(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.avif'].includes(ext);
-}
-
-async function getConfiguredBackgroundStoragePath() {
-  const settings = await prisma.settings.findUnique({
-    where: { id: 1 },
-    select: { backgroundImageStoragePath: true }
-  });
-
-  return sanitizeStoragePath(settings?.backgroundImageStoragePath);
-}
-
-async function getBackgroundUploadDirectory() {
-  const configuredPath = await getConfiguredBackgroundStoragePath();
-  if (configuredPath) {
-    return resolveConfiguredStoragePath(configuredPath);
-  }
-
-  return path.resolve(getUploadDirectory('backgrounds'));
-}
-
-async function ensureBackgroundUploadDirectory() {
-  const uploadDir = await getBackgroundUploadDirectory();
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-  }
-
-  return uploadDir;
 }
 
 async function walkImageFilesRecursive(rootDir, maxFiles = 5000) {
@@ -187,11 +78,11 @@ router.get('/', async (req, res) => {
   console.log('📸 [BACKGROUNDS] API endpoint called');
   
   try {
-    const backgrounds = await prisma.backgroundImage.findMany({
+    const backgrounds = await removeMissingBackgrounds(await prisma.backgroundImage.findMany({
       orderBy: {
         updatedAt: 'desc'
       }
-    });
+    }));
 
     console.log(`📸 [BACKGROUNDS] Found ${backgrounds.length} backgrounds`);
 
@@ -297,8 +188,12 @@ router.get('/:id/image', async (req, res) => {
       });
     }
 
-    // Check if file exists
-    if (!fs.existsSync(background.path)) {
+    let imageFile;
+    try {
+      imageFile = await fsp.open(background.path, 'r');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      await removeMissingBackgrounds([background]);
       console.error('📸 [BACKGROUNDS] File not found:', background.path);
       return res.status(404).json({
         success: false,
@@ -311,7 +206,12 @@ router.get('/:id/image', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
 
     // Stream the file
-    const stream = fs.createReadStream(background.path);
+    const stream = imageFile.createReadStream();
+    stream.on('error', error => {
+      console.error('📸 [BACKGROUNDS] Error streaming image:', error);
+      res.destroy(error);
+    });
+    res.on('close', () => stream.destroy());
     stream.pipe(res);
   } catch (error) {
     console.error('📸 [BACKGROUNDS] Error serving image:', error);

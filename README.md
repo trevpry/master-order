@@ -18,6 +18,7 @@ A comprehensive media management application that intelligently curates your nex
 - **Comic Publisher Integration**: Automatically extracts and displays comic publisher information from ComicVine
 - **Advanced Statistics**: Publisher breakdowns, author statistics, and comprehensive watch analytics
 - **Real-time Artwork**: Dynamic artwork fetching and caching from TVDB
+- **Background Image Cleanup**: Loading backgrounds or galleries automatically removes database records for missing local image files and updates gallery counts. Image requests also clean up missing records. Files and galleries are not deleted; records are retained when storage is unavailable or a filesystem check fails. Deleted subfolders are cleaned up when their configured background storage root remains accessible.
 
 ### Book Chapters and Sections
 - In **Media > Books**, open a book and use **Add Chapters / Sections to Custom Order**, or the add-to-order button beside an individual chapter or section.

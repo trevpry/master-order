@@ -1,12 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../prismaClient'); // Use shared singleton instance
+const { removeMissingBackgrounds } = require('../services/backgroundImageService');
 
 // Get all background galleries
 router.get('/', async (req, res) => {
   console.log('🖼️ [BACKGROUND-GALLERIES] API endpoint called');
   
   try {
+    await removeMissingBackgrounds(await prisma.backgroundImage.findMany({
+      select: { id: true, path: true }
+    }));
     const galleries = await prisma.backgroundGallery.findMany({
       include: {
         _count: {
@@ -121,6 +125,8 @@ router.get('/:id', async (req, res) => {
         error: 'Gallery not found'
       });
     }
+
+    gallery.backgrounds = await removeMissingBackgrounds(gallery.backgrounds);
 
     // Add image URLs
     const baseUrl = `${req.protocol}://${req.get('host')}`;
@@ -417,6 +423,7 @@ router.get('/:id/backgrounds', async (req, res) => {
       });
     }
 
+    gallery.backgrounds = await removeMissingBackgrounds(gallery.backgrounds);
     console.log(`🖼️ [BACKGROUND-GALLERIES] Found ${gallery.backgrounds.length} backgrounds`);
 
     res.json(gallery.backgrounds);
